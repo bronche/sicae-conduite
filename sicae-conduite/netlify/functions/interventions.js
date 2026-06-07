@@ -57,7 +57,7 @@ exports.handler = async (event) => {
         type,
         sous_type:   sous_type || null,
         site:        site || null,
-        ouvrage:     ouvrage || null,
+        ouvrage:     ouvrage || '',
         statut:      statut || 'En cours',
         observations: observations || null,
         intervenants: Array.isArray(intervenants) ? intervenants : [],
