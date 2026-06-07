@@ -1,0 +1,16 @@
+{
+  "name": "sicae-conduite",
+  "version": "1.0.0",
+  "description": "SICAE – Conduite GRD : suivi des opérations terrain pour Gestionnaire de Réseau de Distribution",
+  "private": true,
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "scripts": {
+    "dev": "netlify dev",
+    "deploy": "netlify deploy --prod"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

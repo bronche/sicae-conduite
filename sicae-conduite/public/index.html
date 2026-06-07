@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a3a5c" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>SICAE – Conduite GRD</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- LOGIN OVERLAY -->
+  <div id="login-overlay" class="login-overlay">
+    <div class="login-card">
+      <div class="login-logo">
+        <img src="logo.png" alt="GRD" style="height:80px;width:auto;object-fit:contain" onerror="this.replaceWith('⚡')" />
+      </div>
+      <div class="login-title">SICAE – Conduite GRD</div>
+      <div class="login-subtitle">Accès réservé aux agents habilités</div>
+      <div class="form-group">
+        <label for="login-username">Nom d'utilisateur</label>
+        <input type="text" id="login-username" placeholder="Prénom Nom" autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label for="login-password">Mot de passe</label>
+        <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+      <div class="login-error" id="login-error"></div>
+      <button class="btn btn-primary" id="btn-login">Se connecter</button>
+    </div>
+  </div>
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-brand">
+      <button id="btn-fab-new" class="btn-new-header" title="Nouvelle intervention">+</button>
+      <img src="logo.png" alt="GRD" class="header-logo" style="height:38px;width:auto;object-fit:contain;filter:brightness(0) invert(1)" onerror="this.outerHTML='<span class=header-logo>⚡</span>'" />
+      <div>
+        <div class="header-title">SICAE – Conduite GRD</div>
+        <div class="header-subtitle">Suivi des opérations terrain</div>
+      </div>
+    </div>
+    <div class="header-user">
+      <div class="user-pill">
+        <div class="user-avatar" id="user-avatar">?</div>
+        <span id="user-display-name"></span>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="btn-logout" style="background:rgba(255,255,255,.15);color:#fff">Déconnexion</button>
+    </div>
+    <div class="header-clock">
+      <div id="clock-date"></div>
+      <div id="clock-time"></div>
+    </div>
+  </header>
+
+  <!-- NAVIGATION -->
+  <nav class="nav" id="main-nav">
+
+    <!-- Accueil -->
+    <div class="nav-item">
+      <button class="nav-btn active" data-tab="dashboard" data-icon="🏠">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-label">Accueil</span>
+        <span class="nav-badge hidden" id="badge-transferts">0</span>
+      </button>
+    </div>
+
+    <!-- Interventions ▾ -->
+    <div class="nav-item nav-has-drop">
+      <button class="nav-btn nav-drop-toggle" data-group="interventions" data-icon="⚡">
+        <span class="nav-icon">⚡</span>
+        <span class="nav-label">Interventions</span>
+        <span class="nav-caret">▾</span>
+      </button>
+      <div class="nav-drop" id="nav-drop-interventions">
+        <button class="nav-drop-item" data-tab="nouvelle">➕&thinsp; Nouvelle</button>
+        <button class="nav-drop-item" data-tab="journal">📋&thinsp; Journal</button>
+        <button class="nav-drop-item" data-tab="historique">🗃️&thinsp; Historique</button>
+      </div>
+    </div>
+
+    <!-- Conduite -->
+    <div class="nav-item">
+      <button class="nav-btn" data-tab="conduite" data-icon="🔄">
+        <span class="nav-icon">🔄</span>
+        <span class="nav-label">Conduite</span>
+        <span class="nav-badge hidden" id="badge-conduite">0</span>
+      </button>
+    </div>
+
+    <!-- Rapports -->
+    <div class="nav-item">
+      <button class="nav-btn" data-tab="rapports" data-icon="📊">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Rapports</span>
+      </button>
+    </div>
+
+    <!-- Réglages ▾ -->
+    <div class="nav-item nav-has-drop">
+      <button class="nav-btn nav-drop-toggle" data-group="reglages" data-icon="⚙️">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label">Réglages</span>
+        <span class="nav-caret">▾</span>
+      </button>
+      <div class="nav-drop" id="nav-drop-reglages">
+        <button class="nav-drop-item" data-tab="parametres">⚙️&thinsp; Paramètres</button>
+        <button class="nav-drop-item hidden" id="nav-sub-admin" data-tab="admin">👤&thinsp; Utilisateurs</button>
+      </div>
+    </div>
+
+  </nav>
+
+  <!-- CONTENU PRINCIPAL -->
+  <main class="main">
+
+    <!-- ==================== TAB : TABLEAU DE BORD ==================== -->
+    <section id="tab-dashboard" class="tab-content active">
+      <div class="counters">
+        <div class="counter counter-orange">
+          <div class="counter-value" id="cnt-en-cours">–</div>
+          <div class="counter-label">En cours</div>
+        </div>
+        <div class="counter counter-green">
+          <div class="counter-value" id="cnt-terminees">–</div>
+          <div class="counter-label">Terminées</div>
+        </div>
+        <div class="counter counter-blue">
+          <div class="counter-value" id="cnt-total">–</div>
+          <div class="counter-label">Total du jour</div>
+        </div>
+      </div>
+
+      <!-- Transferts en attente -->
+      <div id="section-transferts-attente" class="hidden">
+        <h2 class="section-title" style="color:var(--orange)">⇄ Transferts de conduite en attente</h2>
+        <div id="cards-transferts" class="cards-grid" style="margin-bottom:1.5rem"></div>
+      </div>
+
+      <h2 class="section-title">Opérations en cours</h2>
+      <div class="table-wrapper">
+        <table class="ops-table" id="table-en-cours">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Ouvrage</th>
+              <th>Site</th>
+              <th>Début</th>
+              <th>Durée</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-en-cours">
+            <tr><td colspan="6" class="empty-msg">Chargement…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">Opérations du jour</h2>
+      <div id="cards-today" class="cards-grid">
+        <div class="empty-msg">Chargement…</div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB : NOUVELLE INTERVENTION ==================== -->
+    <section id="tab-nouvelle" class="tab-content">
+      <form id="form-intervention" class="form-intervention" novalidate>
+
+        <!-- QUAND ? -->
+        <div class="form-section form-section-when">
+          <div class="form-section-header">
+            <span class="form-section-icon">🗓</span>
+            <span class="form-section-title">Quand ?</span>
+          </div>
+          <div class="form-section-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="f-date">Date <span class="req">*</span></label>
+                <input type="date" id="f-date" required />
+              </div>
+              <div class="form-group">
+                <label for="f-statut">Statut <span class="req">*</span></label>
+                <select id="f-statut" required>
+                  <option value="En cours">En cours</option>
+                  <option value="Terminée">Terminée</option>
+                  <option value="Suspendue">Suspendue</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="f-heure-debut">Heure début <span class="req">*</span></label>
+                <input type="time" id="f-heure-debut" required />
+              </div>
+              <div class="form-group">
+                <label for="f-heure-fin">Heure fin</label>
+                <input type="time" id="f-heure-fin" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- OÙ ? -->
+        <div class="form-section form-section-where">
+          <div class="form-section-header">
+            <span class="form-section-icon">📍</span>
+            <span class="form-section-title">Où ?</span>
+          </div>
+          <div class="form-section-body">
+            <div class="form-group">
+              <label for="f-site">Site / Poste source</label>
+              <select id="f-site">
+                <option value="">— Sélectionner —</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- TYPE D'INTERVENTION -->
+        <div class="form-section form-section-what">
+          <div class="form-section-header">
+            <span class="form-section-icon">⚡</span>
+            <span class="form-section-title">Type d'intervention</span>
+          </div>
+          <div class="form-section-body">
+            <div class="form-group">
+              <label for="f-type">Catégorie <span class="req">*</span></label>
+              <select id="f-type" required onchange="onTypeChange()">
+                <option value="">— Sélectionner —</option>
+              </select>
+            </div>
+            <div id="cascade-container"></div>
+            <div class="form-group" style="margin-top:.75rem">
+              <label for="f-observations">Observations</label>
+              <textarea id="f-observations" rows="3" placeholder="Notes, contexte, actions menées…"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- INTERVENANTS -->
+        <div class="form-section form-section-who">
+          <div class="form-section-header">
+            <span class="form-section-icon">👷</span>
+            <span class="form-section-title">Intervenants</span>
+          </div>
+          <div class="form-section-body">
+            <div class="form-group">
+              <label for="f-entreprise">Entreprise</label>
+              <select id="f-entreprise" onchange="onEntrepriseChange()">
+                <option value="">— Sélectionner une entreprise —</option>
+              </select>
+            </div>
+            <div id="agents-checkboxes-group" class="agents-pills-group">
+              <div id="agents-checkboxes" class="agents-pills"></div>
+            </div>
+            <div id="intervenants-selected" class="intervenants-chips" style="margin-top:.6rem"></div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary btn-enregistrer">✅ Enregistrer l'intervention</button>
+          <button type="reset" class="btn btn-ghost">Réinitialiser</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ==================== TAB : HISTORIQUE ==================== -->
+    <section id="tab-historique" class="tab-content">
+      <h2 class="section-title">Historique des interventions</h2>
+      <div class="filter-bar">
+        <button class="filter-btn active" data-filter="tous">Tous</button>
+        <button class="filter-btn" data-filter="En cours">En cours</button>
+        <button class="filter-btn" data-filter="Terminée">Terminées</button>
+        <button class="filter-btn" data-filter="Suspendue">Suspendues</button>
+        <button class="filter-btn" data-filter="En transfert">En transfert</button>
+        <button class="filter-btn" data-filter="Archivée">Archivées</button>
+      </div>
+      <div id="cards-historique" class="cards-grid">
+        <div class="empty-msg">Chargement…</div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB : PARAMÈTRES ==================== -->
+    <section id="tab-parametres" class="tab-content">
+      <h2 class="section-title">Gestion des listes déroulantes</h2>
+
+      <div id="listes-container">
+        <div class="empty-msg">Chargement…</div>
+      </div>
+
+      <h2 class="section-title" style="margin-top:2rem">Sauvegarde &amp; Restauration</h2>
+      <div class="param-card">
+        <div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center">
+          <div>
+            <h3 class="param-card-title" style="margin-bottom:.25rem">Export complet</h3>
+            <p class="param-hint" style="margin:0">Télécharge interventions + listes au format JSON.</p>
+          </div>
+          <button class="btn btn-primary" id="btn-export" style="margin-left:auto">⬇ Télécharger la sauvegarde</button>
+        </div>
+      </div>
+
+      <div class="param-card">
+        <h3 class="param-card-title">Import complet</h3>
+        <p class="param-hint">Restaure les listes <strong>et</strong> les interventions depuis un fichier de sauvegarde.<br>Les listes existantes sont remplacées ; les interventions existantes sont conservées (fusion par ID).</p>
+        <label class="file-label" style="margin-top:.75rem">
+          <input type="file" id="import-complet-file" accept=".json" />
+          Choisir un fichier de sauvegarde JSON
+        </label>
+        <button class="btn btn-secondary" id="btn-import-complet" style="margin-top:.5rem">⬆ Importer la sauvegarde</button>
+      </div>
+    </section>
+
+    <!-- ==================== TAB : JOURNAL ==================== -->
+    <section id="tab-journal" class="tab-content">
+      <div class="journal-header">
+        <h2 class="section-title" style="margin:0">Journal des interventions</h2>
+        <button class="btn btn-sm btn-secondary" id="btn-journal-refresh">🔄 Rafraîchir</button>
+      </div>
+
+      <div class="journal-filtres">
+        <input type="text" id="journal-search" placeholder="🔍 Rechercher type, ouvrage, site…" />
+        <select id="journal-statut-filter">
+          <option value="">Tous les statuts</option>
+          <option value="En cours">En cours</option>
+          <option value="Terminée">Terminée</option>
+          <option value="Suspendue">Suspendue</option>
+          <option value="En transfert">En transfert</option>
+          <option value="Archivée">Archivée</option>
+        </select>
+        <div class="journal-dates">
+          <input type="date" id="journal-date-debut" title="Du" />
+          <span style="font-size:.85rem;color:var(--gray-500)">→</span>
+          <input type="date" id="journal-date-fin" title="Au" />
+        </div>
+      </div>
+
+      <div class="journal-count-bar">
+        <span id="journal-count"></span>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="ops-table journal-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Ouvrage</th>
+              <th>Site</th>
+              <th>Horaires</th>
+              <th>Statut</th>
+              <th>Agent</th>
+              <th>Intervenants</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="journal-tbody">
+            <tr><td colspan="9" class="empty-msg">Chargement…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ==================== TAB : TRANSFERT DE CONDUITE ==================== -->
+    <section id="tab-conduite" class="tab-content">
+      <h2 class="section-title">Transfert de conduite réseau</h2>
+
+      <!-- Conducteur actuel -->
+      <div id="conduite-actuelle" class="param-card conducteur-card">
+        <div class="conducteur-label">Conducteur actuel</div>
+        <div class="conducteur-name" id="conducteur-name">–</div>
+        <div class="conducteur-since" id="conducteur-since"></div>
+      </div>
+
+      <!-- Passation en attente pour moi -->
+      <div id="conduite-attente-section" class="hidden">
+        <h3 class="section-title" style="color:var(--orange);font-size:1rem;margin:1rem 0 .5rem">
+          ⏳ Passation en attente de votre acceptation
+        </h3>
+        <div id="conduite-attente-cards"></div>
+      </div>
+
+      <!-- Formulaire passation -->
+      <div class="param-card">
+        <h3 class="param-card-title">Initier une passation de conduite</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="conduite-to">Transférer à <span class="req">*</span></label>
+            <select id="conduite-to">
+              <option value="">— Sélectionner un agent —</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="conduite-obs">Observations / consignes de relève</label>
+          <textarea id="conduite-obs" rows="3"
+            placeholder="État du réseau, interventions en cours, points d'attention…"></textarea>
+        </div>
+        <button class="btn btn-primary" id="btn-initier-passation">Initier la passation</button>
+      </div>
+
+      <!-- Journal -->
+      <div class="param-card">
+        <h3 class="param-card-title">Journal des passations</h3>
+        <div class="table-wrapper">
+          <table class="ops-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>De</th>
+                <th>Vers</th>
+                <th>Demande</th>
+                <th>Acceptation</th>
+                <th>Statut</th>
+                <th>Observations</th>
+              </tr>
+            </thead>
+            <tbody id="conduite-journal-tbody">
+              <tr><td colspan="7" class="empty-msg">Chargement…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB : RAPPORTS ==================== -->
+    <section id="tab-rapports" class="tab-content">
+      <h2 class="section-title">Générer un rapport d'activité</h2>
+
+      <div class="form-card rapport-filtres">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="r-date-debut">Du</label>
+            <input type="date" id="r-date-debut" />
+          </div>
+          <div class="form-group">
+            <label for="r-date-fin">Au</label>
+            <input type="date" id="r-date-fin" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="r-groupe">Regrouper par</label>
+            <select id="r-groupe">
+              <option value="site">Site</option>
+              <option value="type">Type d'intervention</option>
+              <option value="ouvrage">Ouvrage</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="r-statut-filtre">Statut</label>
+            <select id="r-statut-filtre">
+              <option value="">Tous les statuts</option>
+              <option value="En cours">En cours</option>
+              <option value="Terminée">Terminée</option>
+              <option value="Suspendue">Suspendue</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="btn-generer-rapport">Générer le rapport</button>
+        </div>
+      </div>
+
+      <div id="rapport-resultats" class="hidden">
+
+        <div class="rapport-kpis" id="rapport-kpis"></div>
+
+        <div class="rapport-charts-grid">
+          <div class="chart-card">
+            <h3 class="chart-title">Interventions par <span id="chart-groupe-label">site</span></h3>
+            <canvas id="chart-bar"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3 class="chart-title">Répartition par statut</h3>
+            <canvas id="chart-pie"></canvas>
+          </div>
+        </div>
+
+        <div class="rapport-exports">
+          <button class="btn btn-primary" id="btn-export-excel">⬇ Télécharger Excel</button>
+          <button class="btn btn-secondary" id="btn-export-pdf">⬇ Télécharger PDF</button>
+        </div>
+
+        <h2 class="section-title">Détail des interventions</h2>
+        <div class="table-wrapper">
+          <table class="ops-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Ouvrage</th>
+                <th>Site</th>
+                <th>Début → Fin</th>
+                <th>Durée</th>
+                <th>Statut</th>
+                <th>Observations</th>
+              </tr>
+            </thead>
+            <tbody id="rapport-detail-tbody">
+              <tr><td colspan="8" class="empty-msg">–</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB : ADMINISTRATION ==================== -->
+    <section id="tab-admin" class="tab-content">
+      <h2 class="section-title">Gestion des utilisateurs</h2>
+
+      <div class="param-card">
+        <h3 class="param-card-title">Créer un utilisateur</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="admin-new-nom">Nom d'utilisateur <span class="req">*</span></label>
+            <input type="text" id="admin-new-nom" placeholder="Prénom Nom" />
+          </div>
+          <div class="form-group">
+            <label for="admin-new-pwd">Mot de passe <span class="req">*</span></label>
+            <input type="password" id="admin-new-pwd" placeholder="6 caractères minimum" />
+          </div>
+        </div>
+        <div class="form-group" style="flex-direction:row;align-items:center;gap:.6rem;margin-bottom:1rem">
+          <input type="checkbox" id="admin-new-is-admin" style="width:18px;height:18px;cursor:pointer" />
+          <label for="admin-new-is-admin" style="margin:0;cursor:pointer">Administrateur</label>
+        </div>
+        <button class="btn btn-primary" id="btn-admin-creer">Créer l'utilisateur</button>
+      </div>
+
+      <div class="param-card">
+        <h3 class="param-card-title">Utilisateurs enregistrés</h3>
+        <div class="table-wrapper">
+          <table class="ops-table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Rôle</th>
+                <th>Nouveau mot de passe</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-users-tbody">
+              <tr><td colspan="4" class="empty-msg">Chargement…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <h2 class="section-title" style="margin-top:2rem">Historique des modifications</h2>
+      <div class="param-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+          <p class="param-hint" style="margin:0">Toutes les créations, modifications et suppressions d'interventions.</p>
+          <button class="btn btn-sm btn-secondary" id="btn-refresh-audit">🔄 Rafraîchir</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="ops-table">
+            <thead>
+              <tr>
+                <th>Date / Heure</th>
+                <th>Action</th>
+                <th>Intervention</th>
+                <th>Par</th>
+                <th>Détails</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody">
+              <tr><td colspan="5" class="empty-msg">Cliquez sur Rafraîchir pour charger l'historique.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODALE TRANSFERT DE CONDUITE -->
+  <div id="modal-transfert" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 class="modal-title">⇄ Transférer la conduite</h2>
+      <input type="hidden" id="transfert-intervention-id" />
+      <div class="form-group">
+        <label>Intervention</label>
+        <div id="transfert-intervention-label" style="font-weight:600;color:var(--navy);padding:.4rem 0"></div>
+      </div>
+      <div class="form-group">
+        <label for="transfert-to-email">Transférer à <span class="req">*</span></label>
+        <select id="transfert-to-email">
+          <option value="">— Sélectionner un agent —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="transfert-observation">Observation / Consigne</label>
+        <textarea id="transfert-observation" rows="3" placeholder="Contexte, actions à mener, points d'attention…"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btn-confirmer-transfert">Envoyer le transfert</button>
+        <button class="btn btn-ghost" id="btn-annuler-transfert">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE ÉDITION INTERVENTION -->
+  <div id="modal-edition" class="modal-overlay hidden">
+    <div class="modal modal-large">
+      <h2 class="modal-title">✏️ Modifier l'intervention</h2>
+      <input type="hidden" id="edition-id" />
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edition-date">Date <span class="req">*</span></label>
+          <input type="date" id="edition-date" />
+        </div>
+        <div class="form-group">
+          <label for="edition-statut">Statut</label>
+          <select id="edition-statut">
+            <option value="En cours">En cours</option>
+            <option value="Terminée">Terminée</option>
+            <option value="Suspendue">Suspendue</option>
+            <option value="En transfert">En transfert</option>
+            <option value="Archivée">Archivée</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edition-heure-debut">Heure début <span class="req">*</span></label>
+          <input type="time" id="edition-heure-debut" step="60" />
+        </div>
+        <div class="form-group">
+          <label for="edition-heure-fin">Heure fin</label>
+          <input type="time" id="edition-heure-fin" step="60" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edition-type">Catégorie <span class="req">*</span></label>
+          <select id="edition-type">
+            <option value="">— Sélectionner —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edition-site">Site</label>
+          <select id="edition-site">
+            <option value="">— Sélectionner —</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" id="edition-sous-type-group" style="display:none">
+        <label for="edition-sous-type">Précision</label>
+        <select id="edition-sous-type">
+          <option value="">— Sélectionner —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="edition-ouvrage">Ouvrage <span class="req">*</span></label>
+        <input type="text" id="edition-ouvrage" placeholder="Nom du poste ou de l'ouvrage" />
+      </div>
+      <div class="form-group">
+        <label for="edition-observations">Observations</label>
+        <textarea id="edition-observations" rows="3" placeholder="Notes, contexte, incidents…"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btn-sauvegarder-edition">💾 Sauvegarder</button>
+        <button class="btn btn-ghost" id="btn-annuler-edition">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE CLÔTURE -->
+  <div id="modal-cloture" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 class="modal-title">Clôturer l'intervention</h2>
+      <input type="hidden" id="modal-id" />
+      <div class="form-group">
+        <label for="modal-heure-fin">Heure de fin</label>
+        <input type="time" id="modal-heure-fin" />
+      </div>
+      <div class="form-group">
+        <label for="modal-statut">Statut final</label>
+        <select id="modal-statut">
+          <option value="Terminée">Terminée</option>
+          <option value="Suspendue">Suspendue</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btn-confirmer-cloture">Confirmer</button>
+        <button class="btn btn-ghost" id="btn-annuler-cloture">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE CRÉER SOUS-LISTE -->
+  <div id="modal-creer-enfant" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 class="modal-title">Créer une sous-liste</h2>
+      <p id="creer-enfant-context" class="param-hint" style="margin-bottom:.75rem"></p>
+      <input type="hidden" id="creer-enfant-parent-liste" />
+      <input type="hidden" id="creer-enfant-parent-valeur" />
+      <div class="form-group">
+        <label for="creer-enfant-nom">Nom de la sous-liste <span class="req">*</span></label>
+        <input type="text" id="creer-enfant-nom" placeholder="Ex : Objet réseau, Type d'accès…" />
+      </div>
+      <div class="form-group">
+        <label for="creer-enfant-premiere-valeur">Première valeur <span class="req">*</span></label>
+        <input type="text" id="creer-enfant-premiere-valeur" placeholder="Ex : Antenne HTA…" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btn-confirmer-enfant">Créer la sous-liste</button>
+        <button class="btn btn-ghost" id="btn-annuler-enfant">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
