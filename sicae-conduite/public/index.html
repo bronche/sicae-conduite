@@ -491,16 +491,17 @@
               <tr>
                 <th>Date</th>
                 <th>Type</th>
-                <th>Ouvrage</th>
+                <th>Sous-type</th>
                 <th>Site</th>
                 <th>Début → Fin</th>
                 <th>Durée</th>
                 <th>Statut</th>
                 <th>Observations</th>
+                <th>Intervenants</th>
               </tr>
             </thead>
             <tbody id="rapport-detail-tbody">
-              <tr><td colspan="8" class="empty-msg">–</td></tr>
+              <tr><td colspan="9" class="empty-msg">–</td></tr>
             </tbody>
           </table>
         </div>
@@ -695,12 +696,12 @@
       <input type="hidden" id="creer-enfant-parent-liste" />
       <input type="hidden" id="creer-enfant-parent-valeur" />
       <div class="form-group">
-        <label for="creer-enfant-nom">Nom de la sous-liste <span class="req">*</span></label>
+        <label for="creer-enfant-nom">Nom de la sous-liste</label>
         <input type="text" id="creer-enfant-nom" placeholder="Ex : Objet réseau, Type d'accès…" />
       </div>
       <div class="form-group">
-        <label for="creer-enfant-premiere-valeur">Première valeur <span class="req">*</span></label>
-        <input type="text" id="creer-enfant-premiere-valeur" placeholder="Ex : Antenne HTA…" />
+        <label for="creer-enfant-premiere-valeur">Première valeur <span style="font-size:.8rem;color:#888">(optionnelle)</span></label>
+        <input type="text" id="creer-enfant-premiere-valeur" placeholder="Laisser vide pour créer une liste vide" />
       </div>
       <div class="modal-actions">
         <button class="btn btn-primary" id="btn-confirmer-enfant">Créer la sous-liste</button>

@@ -285,6 +285,10 @@ function cardHTML(i) {
 
   const typeLabel = i.sous_type ? `${esc(i.type)} › ${esc(i.sous_type)}` : esc(i.type);
 
+  const intervenantsHTML = i.intervenants && i.intervenants.length > 0
+    ? i.intervenants.map(iv => `<span class="intervenant-chip-sm">${esc(iv.entreprise)} — ${esc(iv.agent)}</span>`).join('')
+    : '<span class="card-empty-field">Aucun intervenant</span>';
+
   return `
     <div class="card ${sc}">
       <div class="card-header">
@@ -293,13 +297,12 @@ function cardHTML(i) {
       </div>
       <div class="card-meta">
         <span>📅 ${formatDate(i.date)}</span>
-        <span>🕐 ${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ''}</span>
-        ${i.site ? `<span>📍 ${esc(i.site)}</span>` : ''}
+        <span>🕐 ${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ' → —'}</span>
+        <span>📍 ${i.site ? esc(i.site) : '—'}</span>
         ${agentLabel}
       </div>
-      ${i.ouvrage ? `<div class="card-ouvrage">🔌 ${esc(i.ouvrage)}</div>` : ''}
-      ${i.observations ? `<div class="card-obs">${esc(i.observations)}</div>` : ''}
-      ${i.intervenants && i.intervenants.length > 0 ? `<div class="card-intervenants">${i.intervenants.map(iv => `<span class="intervenant-chip-sm">${esc(iv.entreprise)} — ${esc(iv.agent)}</span>`).join('')}</div>` : ''}
+      <div class="card-intervenants">${intervenantsHTML}</div>
+      <div class="card-obs">${i.observations ? esc(i.observations) : '<span class="card-empty-field">Aucune observation</span>'}</div>
       ${isEnTransfert ? '<div class="card-obs" style="color:var(--blue)">⇄ Transfert de conduite en attente…</div>' : ''}
       <div class="card-actions">
         ${editerBtn}
@@ -769,7 +772,8 @@ function renderTreeListe(nom) {
   return `
     <div class="tree-root">
       <div class="tree-root-header">
-        <span>${icon} ${esc(nom)}</span>
+        <span class="tree-root-label" id="listlabel-root-${slug}">${icon} ${esc(nom)}</span>
+        <button class="btn btn-xs btn-ghost" title="Renommer" onclick="renommerListe('${esc_nom}','listlabel-root-${slug}')">✏️</button>
         <span class="tree-root-count">${valeurs.length} valeur${valeurs.length !== 1 ? 's' : ''}</span>
         <button class="btn btn-xs btn-red" onclick="supprimerListe('${esc_nom}')">Supprimer</button>
       </div>
@@ -800,22 +804,19 @@ function renderTreeValeur(parentNom, v) {
     const childSlug = slugify(childListName);
     const childValeurs = listes[childListName] || [];
     const esc_cln = esc(childListName).replace(/'/g, '&#39;');
-    const leafsHTML = childValeurs.map(cv => {
-      const esc_cv = esc(cv).replace(/'/g, '&#39;');
-      return `<div class="tree-leaf">
-        <span class="tree-leaf-dot">·</span>
-        <span class="tree-leaf-label">${esc(cv)}</span>
-        <button class="btn-suppr-valeur tree-leaf-del" title="Supprimer" onclick="supprimerValeur('${esc_cln}','${esc_cv}')">✕</button>
-      </div>`;
-    }).join('');
+
+    // Récursif : chaque valeur enfant peut elle-même avoir une sous-liste
+    const childNodesHTML = childValeurs.map(cv => renderTreeValeur(childListName, cv)).join('');
 
     childHTML = `
       <div class="tree-child" id="${nodeId}-child">
         <div class="tree-child-header">
-          <span class="tree-child-list-label">${esc(childListName)}</span>
+          <span class="tree-child-list-label" id="listlabel-${childSlug}">${esc(childListName)}</span>
+          <button class="btn btn-xs btn-ghost" title="Renommer la liste" onclick="event.stopPropagation();renommerListe('${esc_cln}','listlabel-${childSlug}')">✏️</button>
           <span class="tree-child-count">${childValeurs.length}</span>
+          <button class="btn btn-xs btn-red" title="Supprimer la liste" onclick="event.stopPropagation();supprimerListe('${esc_cln}')">✕</button>
         </div>
-        ${leafsHTML || '<div class="tree-empty">Aucune valeur</div>'}
+        ${childNodesHTML || '<div class="tree-empty">Aucune valeur</div>'}
         <div class="tree-add-row tree-add-child">
           <input type="text" id="add-input-${childSlug}" placeholder="Nouvelle valeur…"
             onkeydown="if(event.key==='Enter') ajouterValeur('${esc(childListName)}')" />
@@ -828,8 +829,9 @@ function renderTreeValeur(parentNom, v) {
     <div class="tree-node${childListName ? ' tree-has-child' : ''}" id="${nodeId}">
       <div class="tree-node-row" ${childListName ? `onclick="toggleTreeNode('${nodeId}')"` : ''}>
         <span class="tree-node-arrow">${childListName ? '▶' : '·'}</span>
-        <span class="tree-node-label">${esc(v)}</span>
+        <span class="tree-node-label" id="${nodeId}-label">${esc(v)}</span>
         <div class="tree-node-actions">
+          <button class="btn btn-xs btn-ghost" title="Renommer" onclick="event.stopPropagation();renommerValeur('${esc_nom}','${esc_v}','${nodeId}-label')">✏️</button>
           ${!childListName
             ? `<button class="btn btn-xs btn-outline" onclick="event.stopPropagation();ouvrirCreerEnfant('${esc_nom}','${esc_v}')">+ Sous-liste</button>`
             : ''}
@@ -843,6 +845,49 @@ function renderTreeValeur(parentNom, v) {
 function toggleTreeNode(nodeId) {
   const el = document.getElementById(nodeId);
   if (el) el.classList.toggle('tree-open');
+}
+
+function renommerValeur(nom_liste, old_val, labelId) {
+  const el = document.getElementById(labelId);
+  if (!el) return;
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.value = old_val;
+  inp.className = 'tree-rename-input';
+  inp.onclick = e => e.stopPropagation();
+
+  const doSave = async () => {
+    const new_val = inp.value.trim();
+    if (!new_val || new_val === old_val) { inp.replaceWith(el); return; }
+    try {
+      await apiFetch('/listes', { method: 'PUT', body: JSON.stringify({ nom_liste, old_valeur: old_val, new_valeur: new_val }) });
+      toast(`"${old_val}" → "${new_val}"`, 'success');
+      await loadListes();
+    } catch(e) {
+      toast('Erreur : ' + e.message, 'error');
+      inp.replaceWith(el);
+    }
+  };
+
+  inp.addEventListener('blur', doSave);
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    if (e.key === 'Escape') { inp.removeEventListener('blur', doSave); inp.replaceWith(el); }
+  });
+
+  el.replaceWith(inp);
+  inp.focus();
+  inp.select();
+}
+
+async function renommerListe(old_nom) {
+  const new_nom = prompt(`Renommer la liste "${old_nom}" :`, old_nom);
+  if (!new_nom || new_nom.trim() === old_nom) return;
+  try {
+    await apiFetch('/listes/liste', { method: 'PUT', body: JSON.stringify({ old_nom, new_nom: new_nom.trim() }) });
+    toast(`Liste renommée en "${new_nom.trim()}".`, 'success');
+    await loadListes();
+  } catch(e) { toast('Erreur : ' + e.message, 'error'); }
 }
 
 function findChildList(parentListName, parentValue) {
@@ -919,8 +964,8 @@ async function confirmerCreerEnfant() {
   const parentValeur   = document.getElementById('creer-enfant-parent-valeur').value;
   const nom_liste      = document.getElementById('creer-enfant-nom').value.trim();
   const premiere_valeur = document.getElementById('creer-enfant-premiere-valeur').value.trim();
-  if (!nom_liste || !premiere_valeur) {
-    toast('Renseignez le nom et la première valeur.', 'error'); return;
+  if (!nom_liste) {
+    toast('Renseignez le nom de la sous-liste.', 'error'); return;
   }
   const parent_key = `${parentListe}::${parentValeur}`;
   try {
@@ -1449,12 +1494,13 @@ async function genererRapport() {
       <tr>
         <td>${formatDate(i.date)}</td>
         <td>${esc(i.type)}</td>
-        <td>${esc(i.ouvrage)}</td>
-        <td>${esc(i.site || '')}</td>
-        <td>${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ''}</td>
+        <td>${esc(i.sous_type || '—')}</td>
+        <td>${esc(i.site || '—')}</td>
+        <td>${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ' → —'}</td>
         <td>${formatDureeMin(calculerDureeMin(i))}</td>
         <td><span class="${badgeClass(i.statut)}">${esc(i.statut)}</span></td>
-        <td>${esc(i.observations || '')}</td>
+        <td>${esc(i.observations || '—')}</td>
+        <td>${i.intervenants && i.intervenants.length > 0 ? i.intervenants.map(iv => `${esc(iv.entreprise)} – ${esc(iv.agent)}`).join(', ') : '—'}</td>
       </tr>`).join('');
 
     document.getElementById('rapport-resultats').classList.remove('hidden');
@@ -1473,7 +1519,7 @@ function exportExcel() {
   const ws1 = XLSX.utils.json_to_sheet(rapportData.map(i => ({
     'Date':           formatDate(i.date),
     'Type':           i.type,
-    'Ouvrage':        i.ouvrage,
+    'Sous-type':      i.sous_type || '',
     'Site':           i.site || '',
     'Heure début':    i.heure_debut,
     'Heure fin':      i.heure_fin || '',
@@ -1537,13 +1583,13 @@ function exportPDF() {
     return `<tr>
       <td>${formatDate(i.date)}</td>
       <td>${esc(i.type)}</td>
-      <td>${esc(i.ouvrage)}</td>
-      <td>${esc(i.site || '')}</td>
-      <td>${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ''}</td>
+      <td>${esc(i.sous_type || '—')}</td>
+      <td>${esc(i.site || '—')}</td>
+      <td>${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ' → —'}</td>
       <td>${formatDureeMin(calculerDureeMin(i))}</td>
       <td><span style="background:${sc}22;color:${sc};padding:2px 8px;border-radius:50px;font-size:8pt;font-weight:700">${esc(i.statut)}</span></td>
-      <td style="font-size:8pt;color:#6c757d">${esc(i.observations || '')}</td>
-      <td style="font-size:8pt">${(i.intervenants && i.intervenants.length > 0) ? i.intervenants.map(iv => `${esc(iv.entreprise)} – ${esc(iv.agent)}`).join('<br>') : ''}</td>
+      <td style="font-size:8pt;color:#6c757d">${esc(i.observations || '—')}</td>
+      <td style="font-size:8pt">${(i.intervenants && i.intervenants.length > 0) ? i.intervenants.map(iv => `${esc(iv.entreprise)} – ${esc(iv.agent)}`).join('<br>') : '—'}</td>
     </tr>`;
   }).join('');
 
@@ -1616,7 +1662,7 @@ tr:nth-child(even) td{background:#f8f9fa}
 
 <div class="sec">Détail des interventions (${rapportData.length})</div>
 <table>
-  <thead><tr><th>Date</th><th>Type</th><th>Ouvrage</th><th>Site</th><th>Horaires</th><th>Durée</th><th>Statut</th><th>Observations</th><th>Intervenants</th></tr></thead>
+  <thead><tr><th>Date</th><th>Type</th><th>Sous-type</th><th>Site</th><th>Horaires</th><th>Durée</th><th>Statut</th><th>Observations</th><th>Intervenants</th></tr></thead>
   <tbody>${lignesDetail}</tbody>
 </table>
 
@@ -2072,3 +2118,5 @@ window.onCascadeChange     = onCascadeChange;
 window.ouvrirCreerEnfant   = ouvrirCreerEnfant;
 window.switchListeCat      = switchListeCat;
 window.toggleTreeNode      = toggleTreeNode;
+window.renommerValeur      = renommerValeur;
+window.renommerListe       = renommerListe;

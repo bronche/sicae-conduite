@@ -8,13 +8,15 @@ const supabase = createClient(
 const HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Content-Type': 'application/json',
 };
 
 function response(statusCode, body) {
   return { statusCode, headers: HEADERS, body: JSON.stringify(body) };
 }
+
+const SENTINEL = '__vide__';
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -23,15 +25,13 @@ exports.handler = async (event) => {
 
   const method = event.httpMethod;
   const path = event.path || '';
-  // Detect sub-routes
-  const isCreer       = path.endsWith('/creer');
-  const isListeDelete = path.endsWith('/liste');
-  const isBulk        = path.endsWith('/bulk');
+  const isCreer      = path.endsWith('/creer');
+  const isListeRoute = path.endsWith('/liste');
+  const isBulk       = path.endsWith('/bulk');
 
   try {
-    // GET /api/listes → toutes les listes groupées + parents (parent_key optionnel)
+    // GET /api/listes → toutes les listes groupées + parents
     if (method === 'GET') {
-      // Essayer avec parent_key ; si la colonne n'existe pas encore, fallback sans
       let result = await supabase
         .from('listes_parametres')
         .select('nom_liste, valeur, ordre, parent_key')
@@ -41,7 +41,6 @@ exports.handler = async (event) => {
 
       let hasParentKey = true;
       if (result.error) {
-        // Colonne parent_key absente (migration pas encore exécutée)
         hasParentKey = false;
         result = await supabase
           .from('listes_parametres')
@@ -56,7 +55,8 @@ exports.handler = async (event) => {
       const parents = {};
       for (const row of result.data) {
         if (!grouped[row.nom_liste]) grouped[row.nom_liste] = [];
-        grouped[row.nom_liste].push(row.valeur);
+        // Filtrer les sentinels (sous-listes vides) de l'affichage
+        if (row.valeur !== SENTINEL) grouped[row.nom_liste].push(row.valeur);
         if (hasParentKey && row.parent_key && !parents[row.nom_liste]) {
           parents[row.nom_liste] = row.parent_key;
         }
@@ -96,22 +96,81 @@ exports.handler = async (event) => {
       return response(201, { inserted: rows.length });
     }
 
-    // POST /api/listes/creer → créer nouvelle liste { nom_liste, premiere_valeur, parent_key? }
+    // POST /api/listes/creer → créer nouvelle liste (premiere_valeur optionnelle)
     if (method === 'POST' && isCreer) {
       const body = JSON.parse(event.body || '{}');
       const { nom_liste, premiere_valeur, parent_key } = body;
-      if (!nom_liste || !premiere_valeur) {
-        return response(400, { error: 'nom_liste et premiere_valeur sont obligatoires' });
+      if (!nom_liste) {
+        return response(400, { error: 'nom_liste est obligatoire' });
       }
-      const row = { nom_liste, valeur: premiere_valeur, ordre: 1 };
+      const valeur = (premiere_valeur || '').trim() || SENTINEL;
+      const ordre  = valeur === SENTINEL ? 0 : 1;
+      const row = { nom_liste, valeur, ordre };
       if (parent_key) row.parent_key = parent_key;
       const { error } = await supabase.from('listes_parametres').insert([row]);
       if (error) return response(500, { error: error.message });
       return response(201, { success: true });
     }
 
+    // PUT /api/listes → renommer une valeur { nom_liste, old_valeur, new_valeur }
+    if (method === 'PUT' && !isListeRoute) {
+      const body = JSON.parse(event.body || '{}');
+      const { nom_liste, old_valeur, new_valeur } = body;
+      if (!nom_liste || !old_valeur || !new_valeur) {
+        return response(400, { error: 'nom_liste, old_valeur et new_valeur sont obligatoires' });
+      }
+      const { error: e1 } = await supabase
+        .from('listes_parametres')
+        .update({ valeur: new_valeur })
+        .eq('nom_liste', nom_liste)
+        .eq('valeur', old_valeur);
+      if (e1) return response(500, { error: e1.message });
+
+      // Cascader le renommage dans les parent_key des sous-listes
+      const old_key = `${nom_liste}::${old_valeur}`;
+      const new_key = `${nom_liste}::${new_valeur}`;
+      await supabase
+        .from('listes_parametres')
+        .update({ parent_key: new_key })
+        .eq('parent_key', old_key);
+
+      return response(200, { success: true });
+    }
+
+    // PUT /api/listes/liste → renommer une liste { old_nom, new_nom }
+    if (method === 'PUT' && isListeRoute) {
+      const body = JSON.parse(event.body || '{}');
+      const { old_nom, new_nom } = body;
+      if (!old_nom || !new_nom) {
+        return response(400, { error: 'old_nom et new_nom sont obligatoires' });
+      }
+      const { error: e1 } = await supabase
+        .from('listes_parametres')
+        .update({ nom_liste: new_nom })
+        .eq('nom_liste', old_nom);
+      if (e1) return response(500, { error: e1.message });
+
+      // Cascader le renommage dans les parent_key qui référencent cet ancien nom
+      const { data: affected } = await supabase
+        .from('listes_parametres')
+        .select('nom_liste, valeur, parent_key')
+        .like('parent_key', `${old_nom}::%`);
+
+      if (affected && affected.length > 0) {
+        for (const row of affected) {
+          const new_key = row.parent_key.replace(`${old_nom}::`, `${new_nom}::`);
+          await supabase
+            .from('listes_parametres')
+            .update({ parent_key: new_key })
+            .eq('nom_liste', row.nom_liste)
+            .eq('valeur', row.valeur);
+        }
+      }
+      return response(200, { success: true });
+    }
+
     // DELETE /api/listes/liste → supprimer toute une liste { nom_liste }
-    if (method === 'DELETE' && isListeDelete) {
+    if (method === 'DELETE' && isListeRoute) {
       const body = JSON.parse(event.body || '{}');
       const { nom_liste } = body;
       if (!nom_liste) return response(400, { error: 'nom_liste est obligatoire' });
@@ -130,7 +189,6 @@ exports.handler = async (event) => {
       if (!nom_liste || !valeur) {
         return response(400, { error: 'nom_liste et valeur sont obligatoires' });
       }
-      // Récupérer l'ordre max existant
       const { data: existing } = await supabase
         .from('listes_parametres')
         .select('ordre')
@@ -142,6 +200,14 @@ exports.handler = async (event) => {
         .from('listes_parametres')
         .insert([{ nom_liste, valeur, ordre: nextOrdre }]);
       if (error) return response(500, { error: error.message });
+
+      // Nettoyer le sentinel si la liste en avait un
+      await supabase
+        .from('listes_parametres')
+        .delete()
+        .eq('nom_liste', nom_liste)
+        .eq('valeur', SENTINEL);
+
       return response(201, { success: true });
     }
 

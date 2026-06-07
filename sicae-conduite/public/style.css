@@ -748,6 +748,17 @@ textarea { resize: vertical; min-height: 80px; }
   padding: .15rem .5rem;
   font-size: .75rem;
 }
+.card-empty-field { color: #adb5bd; font-style: normal; }
+.tree-rename-input {
+  font-size: inherit;
+  font-family: inherit;
+  border: 1px solid var(--primary);
+  border-radius: 4px;
+  padding: 1px 6px;
+  outline: none;
+  width: 140px;
+  background: #fff;
+}
 
 /* ---- JOURNAL DES INTERVENTIONS ---- */
 .journal-header {
