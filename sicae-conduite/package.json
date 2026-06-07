@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "netlify dev",
-    "deploy": "netlify deploy --prod"
+    "deploy": "netlify deploy --prod",
+    "build": "echo 'static site'"
   },
   "engines": {
     "node": ">=18"
