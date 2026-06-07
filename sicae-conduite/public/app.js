@@ -154,6 +154,13 @@ async function apiFetch(path, opts = {}) {
 let allInterventions = [];
 let listes = {};
 let listesParents = {};  // { childListName: 'parentList::parentValue' }
+let currentListeCat = 'interventions';
+const LISTE_CATS = [
+  { id: 'interventions', label: 'Interventions', icon: '⚡', roots: ['Type intervention'] },
+  { id: 'entreprises',   label: 'Entreprises',   icon: '🏭', roots: ['Entreprises'] },
+  { id: 'sites',         label: 'Sites',          icon: '📍', roots: ['Site'] },
+  { id: 'autres',        label: 'Autres',         icon: '📋', roots: null },
+];
 let histFilter = 'tous';
 let chartBar = null;
 let chartPie = null;
@@ -722,58 +729,120 @@ async function loadListes() {
 function renderListes() {
   const container = document.getElementById('listes-container');
   const childListNames = new Set(Object.keys(listesParents));
-  // Afficher uniquement les listes racines (ni internes, ni enfants d'une autre)
-  const noms = Object.keys(listes).filter(n => !childListNames.has(n));
-  if (noms.length === 0) {
-    container.innerHTML = '<div class="empty-msg">Aucune liste configurée.</div>';
-    return;
-  }
-  container.innerHTML = noms.map(nom => renderListeCard(nom)).join('');
-}
+  const rootNoms = Object.keys(listes).filter(n => !childListNames.has(n));
 
-function renderListeCard(nom) {
-  const valeurs = listes[nom] || [];
-  const slug = slugify(nom);
+  const knownRoots = new Set(LISTE_CATS.flatMap(c => c.roots || []));
+  const autresRoots = rootNoms.filter(n => !knownRoots.has(n));
 
-  const valeursHTML = valeurs.map(v => {
-    const childListName = findChildList(nom, v);
-    const esc_nom = esc(nom).replace(/'/g, '&#39;');
-    const esc_v   = esc(v).replace(/'/g, '&#39;');
-    return `
-      <div class="liste-valeur-bloc">
-        <div class="liste-valeur-row">
-          <span class="liste-valeur-label">${esc(v)}</span>
-          <div class="liste-valeur-actions">
-            ${childListName
-              ? `<span class="badge-sous-liste" title="Sous-liste : ${esc(childListName)}">▸ ${esc(childListName)}</span>`
-              : `<button class="btn btn-xs btn-outline" onclick="ouvrirCreerEnfant('${esc_nom}','${esc_v}')">+ Sous-liste</button>`}
-            <button class="btn-suppr-valeur" title="Supprimer" onclick="supprimerValeur('${esc_nom}','${esc_v}')">✕</button>
-          </div>
-        </div>
-        ${childListName ? `<div class="liste-enfant-card">${renderListeCard(childListName)}</div>` : ''}
-      </div>`;
+  const navHTML = LISTE_CATS.map(cat => {
+    const roots = cat.roots ? cat.roots.filter(r => rootNoms.includes(r)) : autresRoots;
+    const total = roots.reduce((a, r) => a + (listes[r]?.length || 0), 0);
+    const badge = total > 0 ? ` <span class="listes-tab-badge">${total}</span>` : '';
+    return `<button class="listes-tab${cat.id === currentListeCat ? ' active' : ''}"
+      onclick="switchListeCat('${cat.id}')">${cat.icon} ${cat.label}${badge}</button>`;
   }).join('');
 
+  const cat = LISTE_CATS.find(c => c.id === currentListeCat);
+  const catRoots = cat.roots ? cat.roots.filter(r => rootNoms.includes(r)) : autresRoots;
+
+  const treeHTML = catRoots.length === 0
+    ? '<div class="empty-msg" style="padding:1.5rem 0">Aucune liste dans cette catégorie.</div>'
+    : catRoots.map(nom => renderTreeListe(nom)).join('');
+
+  container.innerHTML = `<div class="listes-subnav">${navHTML}</div><div class="listes-tree">${treeHTML}</div>`;
+}
+
+function switchListeCat(catId) {
+  currentListeCat = catId;
+  renderListes();
+}
+
+function renderTreeListe(nom) {
+  const valeurs = listes[nom] || [];
+  const slug = slugify(nom);
+  const iconMap = { 'Type intervention': '⚡', 'Entreprises': '🏭', 'Site': '📍' };
+  const icon = iconMap[nom] || '📋';
+  const esc_nom = esc(nom).replace(/'/g, '&#39;');
+
+  const valeursHTML = valeurs.map(v => renderTreeValeur(nom, v)).join('');
+
   return `
-    <div class="param-card liste-bloc">
-      <div class="liste-nom">
-        <span class="liste-nom-label">${esc(nom)}</span>
-        <button class="btn btn-sm btn-red" onclick="supprimerListe('${esc(nom)}')">Supprimer la liste</button>
+    <div class="tree-root">
+      <div class="tree-root-header">
+        <span>${icon} ${esc(nom)}</span>
+        <span class="tree-root-count">${valeurs.length} valeur${valeurs.length !== 1 ? 's' : ''}</span>
+        <button class="btn btn-xs btn-red" onclick="supprimerListe('${esc_nom}')">Supprimer</button>
       </div>
-      <div class="liste-valeurs" id="valeurs-${slug}">
-        ${valeursHTML || '<div style="font-size:.82rem;color:var(--gray-500);font-style:italic;padding:.25rem 0">Aucune valeur</div>'}
-      </div>
-      <div class="add-valeur-row">
-        <input type="text" id="add-input-${slug}" placeholder="Nouvelle valeur…"
-          onkeydown="if(event.key==='Enter') ajouterValeur('${esc(nom)}')" />
-        <button class="btn btn-sm btn-primary" onclick="ajouterValeur('${esc(nom)}')">Ajouter</button>
-      </div>
-      <div class="coller-toggle" onclick="toggleColler('${slug}')">▸ Coller depuis Excel / texte</div>
-      <div id="coller-zone-${slug}" class="coller-zone hidden">
-        <textarea id="coller-input-${slug}" placeholder="Une valeur par ligne…" rows="4"></textarea>
-        <button class="btn btn-sm btn-secondary" onclick="collerValeurs('${esc(nom)}')">Importer</button>
+      <div class="tree-root-body">
+        ${valeursHTML || '<div class="tree-empty">Aucune valeur</div>'}
+        <div class="tree-add-row">
+          <input type="text" id="add-input-${slug}" placeholder="Nouvelle valeur…"
+            onkeydown="if(event.key==='Enter') ajouterValeur('${esc(nom)}')" />
+          <button class="btn btn-sm btn-primary" onclick="ajouterValeur('${esc(nom)}')">+ Ajouter</button>
+        </div>
+        <div class="coller-toggle" onclick="toggleColler('${slug}')">▸ Coller depuis Excel / texte</div>
+        <div id="coller-zone-${slug}" class="coller-zone hidden">
+          <textarea id="coller-input-${slug}" placeholder="Une valeur par ligne…" rows="4"></textarea>
+          <button class="btn btn-sm btn-secondary" onclick="collerValeurs('${esc(nom)}')">Importer</button>
+        </div>
       </div>
     </div>`;
+}
+
+function renderTreeValeur(parentNom, v) {
+  const childListName = findChildList(parentNom, v);
+  const nodeId = `tnode-${slugify(parentNom)}-${slugify(v)}`;
+  const esc_nom = esc(parentNom).replace(/'/g, '&#39;');
+  const esc_v   = esc(v).replace(/'/g, '&#39;');
+
+  let childHTML = '';
+  if (childListName) {
+    const childSlug = slugify(childListName);
+    const childValeurs = listes[childListName] || [];
+    const esc_cln = esc(childListName).replace(/'/g, '&#39;');
+    const leafsHTML = childValeurs.map(cv => {
+      const esc_cv = esc(cv).replace(/'/g, '&#39;');
+      return `<div class="tree-leaf">
+        <span class="tree-leaf-dot">·</span>
+        <span class="tree-leaf-label">${esc(cv)}</span>
+        <button class="btn-suppr-valeur tree-leaf-del" title="Supprimer" onclick="supprimerValeur('${esc_cln}','${esc_cv}')">✕</button>
+      </div>`;
+    }).join('');
+
+    childHTML = `
+      <div class="tree-child" id="${nodeId}-child">
+        <div class="tree-child-header">
+          <span class="tree-child-list-label">${esc(childListName)}</span>
+          <span class="tree-child-count">${childValeurs.length}</span>
+        </div>
+        ${leafsHTML || '<div class="tree-empty">Aucune valeur</div>'}
+        <div class="tree-add-row tree-add-child">
+          <input type="text" id="add-input-${childSlug}" placeholder="Nouvelle valeur…"
+            onkeydown="if(event.key==='Enter') ajouterValeur('${esc(childListName)}')" />
+          <button class="btn btn-sm btn-primary" onclick="ajouterValeur('${esc(childListName)}')">+ Ajouter</button>
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="tree-node${childListName ? ' tree-has-child' : ''}" id="${nodeId}">
+      <div class="tree-node-row" ${childListName ? `onclick="toggleTreeNode('${nodeId}')"` : ''}>
+        <span class="tree-node-arrow">${childListName ? '▶' : '·'}</span>
+        <span class="tree-node-label">${esc(v)}</span>
+        <div class="tree-node-actions">
+          ${!childListName
+            ? `<button class="btn btn-xs btn-outline" onclick="event.stopPropagation();ouvrirCreerEnfant('${esc_nom}','${esc_v}')">+ Sous-liste</button>`
+            : ''}
+          <button class="btn-suppr-valeur" title="Supprimer" onclick="event.stopPropagation();supprimerValeur('${esc_nom}','${esc_v}')">✕</button>
+        </div>
+      </div>
+      ${childHTML}
+    </div>`;
+}
+
+function toggleTreeNode(nodeId) {
+  const el = document.getElementById(nodeId);
+  if (el) el.classList.toggle('tree-open');
 }
 
 function findChildList(parentListName, parentValue) {
@@ -2001,3 +2070,5 @@ window.retirerIntervenant  = retirerIntervenant;
 window.onTypeChange        = onTypeChange;
 window.onCascadeChange     = onCascadeChange;
 window.ouvrirCreerEnfant   = ouvrirCreerEnfant;
+window.switchListeCat      = switchListeCat;
+window.toggleTreeNode      = toggleTreeNode;

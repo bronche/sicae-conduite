@@ -25,3 +25,6 @@ create table if not exists transferts_conduite (
 create index if not exists idx_transferts_to_email on transferts_conduite(to_email);
 create index if not exists idx_transferts_intervention on transferts_conduite(intervention_id);
 create index if not exists idx_transferts_statut on transferts_conduite(statut);
+
+-- Renommage liste Commune → Site (libellé métier)
+update listes_parametres set nom_liste = 'Site' where nom_liste = 'Commune';

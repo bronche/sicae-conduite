@@ -63,10 +63,11 @@ exports.handler = async (event) => {
       if (delError) return response(500, { error: delError.message });
 
       if (listes.length > 0) {
-        const records = listes.map(({ nom_liste, valeur, ordre }) => ({
+        const records = listes.map(({ nom_liste, valeur, ordre, parent_key }) => ({
           nom_liste,
           valeur,
           ordre: ordre || 0,
+          parent_key: parent_key || null,
         }));
         const { error: insError } = await supabase.from('listes_parametres').insert(records);
         if (insError) return response(500, { error: insError.message });
@@ -87,15 +88,17 @@ exports.handler = async (event) => {
       }
 
       const records = interventions.map((i) => ({
-        id: i.id || `INT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        date: i.date,
-        heure_debut: i.heure_debut,
-        heure_fin: i.heure_fin || null,
-        type: i.type,
-        ouvrage: i.ouvrage,
-        commune: i.commune,
-        statut: i.statut || 'En cours',
+        id:           i.id || `INT-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        date:         i.date,
+        heure_debut:  i.heure_debut,
+        heure_fin:    i.heure_fin || null,
+        type:         i.type,
+        sous_type:    i.sous_type || null,
+        site:         i.site || null,
+        ouvrage:      i.ouvrage || null,
+        statut:       i.statut || 'En cours',
         observations: i.observations || null,
+        intervenants: Array.isArray(i.intervenants) ? i.intervenants : [],
       }));
 
       // Upsert pour éviter les doublons sur l'id

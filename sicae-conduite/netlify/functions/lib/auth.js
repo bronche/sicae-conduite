@@ -17,4 +17,26 @@ async function verifyToken(authHeader) {
   }
 }
 
-module.exports = { supabase, verifyToken };
+async function verifyAdmin(authHeader) {
+  const user = await verifyToken(authHeader);
+  if (!user) return null;
+  const { data } = await supabase
+    .from('app_users')
+    .select('is_admin')
+    .eq('email', user.email)
+    .single();
+  if (!data?.is_admin) return null;
+  return user;
+}
+
+function usernameToEmail(username) {
+  const safe = username
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9._-]/g, '.')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+  return `${safe || 'user'}@sicae.internal`;
+}
+
+module.exports = { supabase, verifyToken, verifyAdmin, usernameToEmail };

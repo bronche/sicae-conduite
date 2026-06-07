@@ -1,5 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
-const { verifyToken } = require('./lib/auth');
+const { verifyToken, usernameToEmail } = require('./lib/auth');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -26,8 +26,10 @@ exports.handler = async (event) => {
   try {
     // POST /api/auth/login
     if (method === 'POST' && path.endsWith('/login')) {
-      const { email, password } = JSON.parse(event.body || '{}');
-      if (!email || !password) return response(400, { error: 'Email et mot de passe requis' });
+      const { username, password } = JSON.parse(event.body || '{}');
+      if (!username || !password) return response(400, { error: 'Nom et mot de passe requis' });
+
+      const email = usernameToEmail(username);
 
       const res = await fetch(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
@@ -39,11 +41,11 @@ exports.handler = async (event) => {
       });
 
       const data = await res.json();
-      if (!res.ok) return response(401, { error: 'Email ou mot de passe incorrect' });
+      if (!res.ok) return response(401, { error: 'Identifiants incorrects' });
 
       const { data: appUser } = await supabase
         .from('app_users')
-        .select('display_name')
+        .select('display_name, is_admin')
         .eq('email', data.user.email)
         .single();
 
@@ -51,7 +53,8 @@ exports.handler = async (event) => {
         access_token:  data.access_token,
         refresh_token: data.refresh_token,
         email:         data.user.email,
-        display_name:  appUser?.display_name || data.user.email,
+        display_name:  appUser?.display_name || username,
+        is_admin:      appUser?.is_admin || false,
       });
     }
 
@@ -70,7 +73,7 @@ exports.handler = async (event) => {
       return response(200, { success: true });
     }
 
-    // GET /api/auth/users — liste des autres utilisateurs (pour dropdown transfert)
+    // GET /api/auth/users — liste des agents pour le dropdown de transfert
     if (method === 'GET' && path.endsWith('/users')) {
       const user = await verifyToken(event.headers.authorization);
       if (!user) return response(401, { error: 'Non authentifié' });
@@ -84,7 +87,7 @@ exports.handler = async (event) => {
       return response(200, data);
     }
 
-    // GET /api/auth/config — config publique Supabase (anon key + URL, pas de secrets)
+    // GET /api/auth/config — config publique Supabase
     if (method === 'GET' && path.endsWith('/config')) {
       return response(200, {
         supabase_url:      process.env.SUPABASE_URL || '',

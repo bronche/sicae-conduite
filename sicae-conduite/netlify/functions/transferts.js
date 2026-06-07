@@ -27,7 +27,7 @@ exports.handler = async (event) => {
       const pending = event.queryStringParameters?.pending === '1';
       let query = supabase
         .from('transferts_conduite')
-        .select('*, intervention:interventions(type, ouvrage, commune, statut, heure_debut)');
+        .select('*, intervention:interventions(type, ouvrage, site, statut, heure_debut)');
 
       if (pending) {
         query = query.eq('to_email', user.email).eq('statut', 'En attente');
