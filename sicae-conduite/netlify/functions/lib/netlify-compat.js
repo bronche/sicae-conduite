@@ -1,11 +1,16 @@
 // Adaptateur Netlify Lambda → Vercel Node.js
 function netlifyCompat(handler) {
   return async (req, res) => {
-    const url = req.url || '';
-    const pathOnly = url.split('?')[0];
+    const url      = req.url || '';
+    const basePath = url.split('?')[0];
 
     const qs = { ...req.query };
-    delete qs.slug; // paramètre de routing Vercel catch-all
+    delete qs.slug;
+
+    // Vercel rewrites passent le sous-chemin via ?_p=
+    const subPath = qs._p;
+    delete qs._p;
+    const pathOnly = subPath ? `${basePath}/${subPath}` : basePath;
 
     const body = req.body != null
       ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body))

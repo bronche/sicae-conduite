@@ -1,3 +1,13 @@
 {
-  "framework": null
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/auth/:path*",          "destination": "/api/auth?_p=:path*" },
+    { "source": "/api/interventions/:path*", "destination": "/api/interventions?_p=:path*" },
+    { "source": "/api/listes/:path*",        "destination": "/api/listes?_p=:path*" },
+    { "source": "/api/transferts/:path*",    "destination": "/api/transferts?_p=:path*" },
+    { "source": "/api/backup/:path*",        "destination": "/api/backup?_p=:path*" },
+    { "source": "/api/users/:path*",         "destination": "/api/users?_p=:path*" },
+    { "source": "/api/journal/:path*",       "destination": "/api/journal?_p=:path*" },
+    { "source": "/api/conduite/:path*",      "destination": "/api/conduite?_p=:path*" }
+  ]
 }
