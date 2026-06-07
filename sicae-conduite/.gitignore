@@ -1,2 +1,9 @@
 # Local Netlify folder
 .netlify
+
+.vercel
+
+# Secrets - ne jamais commiter
+.env
+*.env
+deno.lock
