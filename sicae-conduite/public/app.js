@@ -153,6 +153,7 @@ async function apiFetch(path, opts = {}) {
 
 let allInterventions = [];
 let listes = {};
+let listesParents = {};  // { childListName: 'parentList::parentValue' }
 let histFilter = 'tous';
 let chartBar = null;
 let chartPie = null;
@@ -181,9 +182,23 @@ function updateClock() {
 
 function switchTab(tabId) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + tabId).classList.add('active');
-  document.querySelector(`.nav-btn[data-tab="${tabId}"]`).classList.add('active');
+  document.querySelectorAll('.nav-btn, .nav-drop-item').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('drop-open'));
+
+  document.getElementById('tab-' + tabId)?.classList.add('active');
+
+  const directBtn = document.querySelector(`.nav-btn[data-tab="${tabId}"]`);
+  if (directBtn) {
+    directBtn.classList.add('active');
+  } else {
+    const subBtn = document.querySelector(`.nav-drop-item[data-tab="${tabId}"]`);
+    if (subBtn) {
+      subBtn.classList.add('active');
+      subBtn.closest('.nav-item')?.querySelector('.nav-btn')?.classList.add('active');
+    }
+  }
+
+  if (tabId === 'journal') loadJournal();
 }
 
 /* ============================================================
@@ -210,9 +225,9 @@ async function loadDashboard(notifyTransferts = false) {
     } else {
       tbody.innerHTML = enCours.map(i => `
         <tr>
-          <td>${esc(i.type)}</td>
+          <td>${i.sous_type ? `${esc(i.type)} › ${esc(i.sous_type)}` : esc(i.type)}</td>
           <td>${esc(i.ouvrage)}</td>
-          <td>${esc(i.commune)}</td>
+          <td>${esc(i.site || '')}</td>
           <td>${esc(i.heure_debut)}</td>
           <td class="duree-cell" data-debut="${esc(i.heure_debut)}">${dureeSince(i.heure_debut)}</td>
           <td><button class="btn btn-sm btn-orange" onclick="ouvrirCloture('${esc(i.id)}')">Clôturer</button></td>
@@ -250,6 +265,8 @@ function cardHTML(i) {
   const isEnTransfert = i.statut === 'En transfert';
   const agentLabel   = i.agent_email ? `<span>👤 ${esc(i.agent_email)}</span>` : '';
 
+  const editerBtn   = !isArchivee
+    ? `<button class="btn btn-sm btn-secondary" onclick="ouvrirEditionIntervention('${esc(i.id)}')">✏️ Modifier</button>` : '';
   const cloturBtn   = isEnCours
     ? `<button class="btn btn-sm btn-orange" onclick="ouvrirCloture('${esc(i.id)}')">Clôturer</button>` : '';
   const transfertBtn = isEnCours
@@ -259,22 +276,26 @@ function cardHTML(i) {
   const desarchiverBtn = isArchivee
     ? `<button class="btn btn-sm btn-ghost" onclick="desarchiverIntervention('${esc(i.id)}')">Désarchiver</button>` : '';
 
+  const typeLabel = i.sous_type ? `${esc(i.type)} › ${esc(i.sous_type)}` : esc(i.type);
+
   return `
     <div class="card ${sc}">
       <div class="card-header">
-        <span class="card-type">${esc(i.type)}</span>
+        <span class="card-type">${typeLabel}</span>
         <span class="${bc}">${esc(i.statut)}</span>
       </div>
       <div class="card-meta">
         <span>📅 ${formatDate(i.date)}</span>
         <span>🕐 ${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ''}</span>
-        <span>📍 ${esc(i.commune)}</span>
+        ${i.site ? `<span>📍 ${esc(i.site)}</span>` : ''}
         ${agentLabel}
       </div>
-      <div class="card-ouvrage">🔌 ${esc(i.ouvrage)}</div>
+      ${i.ouvrage ? `<div class="card-ouvrage">🔌 ${esc(i.ouvrage)}</div>` : ''}
       ${i.observations ? `<div class="card-obs">${esc(i.observations)}</div>` : ''}
+      ${i.intervenants && i.intervenants.length > 0 ? `<div class="card-intervenants">${i.intervenants.map(iv => `<span class="intervenant-chip-sm">${esc(iv.entreprise)} — ${esc(iv.agent)}</span>`).join('')}</div>` : ''}
       ${isEnTransfert ? '<div class="card-obs" style="color:var(--blue)">⇄ Transfert de conduite en attente…</div>' : ''}
       <div class="card-actions">
+        ${editerBtn}
         ${cloturBtn}
         ${transfertBtn}
         ${archiverBtn}
@@ -304,13 +325,73 @@ async function initFormInterventions() {
 }
 
 function populateSelects() {
-  fillSelect('f-type',    listes['Type intervention'] || []);
-  fillSelect('f-commune', listes['Commune'] || []);
+  fillSelect('f-type', listes['Type intervention'] || []);
+  fillSelect('f-site', listes['Site'] || []);
+  fillSelect('f-entreprise', listes['Entreprises'] || []);
 }
 
-function fillSelect(id, values) {
+/* ---------- Intervenants en cascade ---------- */
+
+let selectedIntervenants = [];  // [{entreprise, agent}, ...]
+
+function onEntrepriseChange() {
+  const entreprise = document.getElementById('f-entreprise').value;
+  const box = document.getElementById('agents-checkboxes');
+  if (!entreprise || !box) return;
+  if (!entreprise) { box.innerHTML = ''; return; }
+
+  const childListName = findChildList('Entreprises', entreprise)
+                     || `Agents ${entreprise}`;  // fallback ancienne convention
+  const agents = listes[childListName] || [];
+
+  if (agents.length === 0) {
+    box.innerHTML = '<span class="agents-empty">Aucun personnel configuré pour cette entreprise</span>';
+    return;
+  }
+  box.innerHTML = agents.map(a => {
+    const selected = selectedIntervenants.some(i => i.entreprise === entreprise && i.agent === a);
+    return `<button type="button" class="agent-pill${selected ? ' selected' : ''}"
+      onclick="toggleAgentPill(this,'${esc(entreprise)}','${esc(a)}')">${esc(a)}</button>`;
+  }).join('');
+}
+
+function toggleAgentPill(btn, entreprise, agent) {
+  const isSelected = btn.classList.toggle('selected');
+  majIntervenants(entreprise, agent, isSelected);
+}
+
+function majIntervenants(entreprise, agent, checked) {
+  if (checked) {
+    if (!selectedIntervenants.find(i => i.entreprise === entreprise && i.agent === agent)) {
+      selectedIntervenants.push({ entreprise, agent });
+    }
+  } else {
+    selectedIntervenants = selectedIntervenants.filter(i => !(i.entreprise === entreprise && i.agent === agent));
+  }
+  renderIntervenantsChips();
+}
+
+function renderIntervenantsChips() {
+  const el = document.getElementById('intervenants-selected');
+  if (!el) return;
+  el.innerHTML = selectedIntervenants.map((i, idx) => `
+    <span class="intervenant-chip">
+      <strong>${esc(i.entreprise)}</strong> — ${esc(i.agent)}
+      <button onclick="retirerIntervenant(${idx})" title="Retirer">✕</button>
+    </span>`).join('');
+}
+
+function retirerIntervenant(idx) {
+  selectedIntervenants.splice(idx, 1);
+  renderIntervenantsChips();
+  onEntrepriseChange(); // resynchronise les cases de l'entreprise affichée
+}
+
+
+function fillSelect(id, values, selectedValue) {
   const sel = document.getElementById(id);
-  const cur = sel.value;
+  if (!sel) return;
+  const cur = selectedValue !== undefined ? selectedValue : sel.value;
   sel.innerHTML = '<option value="">— Sélectionner —</option>';
   values.forEach(v => {
     const opt = document.createElement('option');
@@ -329,12 +410,11 @@ async function soumettreIntervention(e) {
   const statut      = document.getElementById('f-statut').value;
   const heure_debut = document.getElementById('f-heure-debut').value;
   const heure_fin   = document.getElementById('f-heure-fin').value || null;
-  const type        = document.getElementById('f-type').value;
-  const commune     = document.getElementById('f-commune').value;
-  const ouvrage     = document.getElementById('f-ouvrage').value.trim();
+  const { type, sous_type } = getCascadeValues();
+  const site        = document.getElementById('f-site').value || null;
   const observations = document.getElementById('f-observations').value.trim() || null;
 
-  if (!date || !heure_debut || !type || !commune || !ouvrage) {
+  if (!date || !heure_debut || !type) {
     toast('Veuillez remplir tous les champs obligatoires.', 'error');
     return;
   }
@@ -344,12 +424,18 @@ async function soumettreIntervention(e) {
   try {
     await apiFetch('/interventions', {
       method: 'POST',
-      body: JSON.stringify({ id, date, statut, heure_debut, heure_fin, type, commune, ouvrage, observations }),
+      body: JSON.stringify({ id, date, statut, heure_debut, heure_fin, type, sous_type, site, observations, intervenants: selectedIntervenants }),
     });
     toast('Intervention enregistrée avec succès.', 'success');
     form.reset();
     document.getElementById('f-date').value = todayISO();
     document.getElementById('f-heure-debut').value = nowHHMM();
+    document.getElementById('cascade-container').innerHTML = '';
+    selectedIntervenants = [];
+    if (document.getElementById('intervenants-selected')) document.getElementById('intervenants-selected').innerHTML = '';
+    if (document.getElementById('agents-checkboxes'))    document.getElementById('agents-checkboxes').innerHTML = '';
+    if (document.getElementById('f-entreprise'))         document.getElementById('f-entreprise').value = '';
+    populateSelects();
     await loadDashboard();
     await loadHistorique();
   } catch (err) {
@@ -429,12 +515,203 @@ async function confirmerCloture() {
 }
 
 /* ============================================================
+   JOURNAL DES INTERVENTIONS
+   ============================================================ */
+
+let journalData = [];
+
+async function loadJournal() {
+  try {
+    const data = await apiFetch('/interventions?include_archived=1');
+    journalData = data;
+    filterJournal();
+  } catch (e) {
+    toast('Erreur chargement journal : ' + e.message, 'error');
+  }
+}
+
+function filterJournal() {
+  const search = (document.getElementById('journal-search')?.value || '').toLowerCase();
+  const statut = document.getElementById('journal-statut-filter')?.value || '';
+  const dateD  = document.getElementById('journal-date-debut')?.value || '';
+  const dateF  = document.getElementById('journal-date-fin')?.value || '';
+
+  let data = journalData;
+  if (search) data = data.filter(i =>
+    (i.type || '').toLowerCase().includes(search) ||
+    (i.ouvrage || '').toLowerCase().includes(search) ||
+    (i.site || '').toLowerCase().includes(search) ||
+    (i.observations || '').toLowerCase().includes(search)
+  );
+  if (statut) data = data.filter(i => i.statut === statut);
+  if (dateD)  data = data.filter(i => i.date >= dateD);
+  if (dateF)  data = data.filter(i => i.date <= dateF);
+
+  renderJournal(data);
+  const cnt = document.getElementById('journal-count');
+  if (cnt) cnt.textContent = data.length < journalData.length
+    ? `${data.length} résultat(s) sur ${journalData.length} intervention(s)`
+    : `${data.length} intervention(s) au total`;
+}
+
+function renderJournal(data) {
+  const tbody = document.getElementById('journal-tbody');
+  if (!tbody) return;
+  if (data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-msg">Aucune intervention trouvée</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(i => {
+    const bc = badgeClass(i.statut);
+    const intervenantsText = (i.intervenants && i.intervenants.length > 0)
+      ? i.intervenants.map(iv => `${iv.entreprise} – ${iv.agent}`).join(', ')
+      : '';
+    const agentNom = i.agent_email ? i.agent_email.split('@')[0] : '–';
+    return `<tr>
+      <td style="white-space:nowrap">${formatDate(i.date)}</td>
+      <td>${esc(i.type)}</td>
+      <td><strong>${esc(i.ouvrage)}</strong></td>
+      <td>${esc(i.site || '–')}</td>
+      <td style="white-space:nowrap">${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ''}</td>
+      <td><span class="${bc}">${esc(i.statut)}</span></td>
+      <td style="font-size:.82rem">${esc(agentNom)}</td>
+      <td style="font-size:.75rem;color:var(--gray-500);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(intervenantsText)}">${esc(intervenantsText) || '–'}</td>
+      <td>
+        <div class="journal-actions">
+          <button class="btn btn-sm btn-primary" title="Modifier" onclick="ouvrirEditionIntervention('${esc(i.id)}')">✏️ Éditer</button>
+          <button class="btn btn-sm btn-red" title="Supprimer" onclick="supprimerDepuisJournal('${esc(i.id)}')">🗑️</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---------- Modale édition ---------- */
+
+function ouvrirEditionIntervention(id) {
+  const i = journalData.find(x => x.id === id) || allInterventions.find(x => x.id === id);
+  if (!i) { toast('Intervention introuvable.', 'error'); return; }
+  document.getElementById('edition-id').value           = id;
+  document.getElementById('edition-date').value         = i.date || '';
+  document.getElementById('edition-statut').value       = i.statut || 'En cours';
+  document.getElementById('edition-heure-debut').value  = i.heure_debut || '';
+  document.getElementById('edition-heure-fin').value    = i.heure_fin || '';
+  document.getElementById('edition-observations').value = i.observations || '';
+  fillSelect('edition-type', listes['Type intervention'] || [], i.type);
+  fillSelect('edition-site', listes['Site'] || [], i.site);
+  // Sous-type cascade
+  const childListEdition = findChildList('Type intervention', i.type);
+  const grpEdition = document.getElementById('edition-sous-type-group');
+  if (childListEdition && listes[childListEdition]) {
+    fillSelect('edition-sous-type', listes[childListEdition], i.sous_type);
+    if (grpEdition) grpEdition.style.display = '';
+  } else {
+    if (grpEdition) grpEdition.style.display = 'none';
+  }
+  document.getElementById('modal-edition').classList.remove('hidden');
+}
+
+function fermerEdition() {
+  document.getElementById('modal-edition').classList.add('hidden');
+}
+
+async function sauvegarderEdition() {
+  const id = document.getElementById('edition-id').value;
+  const updates = {
+    date:         document.getElementById('edition-date').value,
+    statut:       document.getElementById('edition-statut').value,
+    heure_debut:  document.getElementById('edition-heure-debut').value,
+    heure_fin:    document.getElementById('edition-heure-fin').value || null,
+    type:         document.getElementById('edition-type').value,
+    sous_type:    document.getElementById('edition-sous-type')?.value || null,
+    site:         document.getElementById('edition-site').value || null,
+    observations: document.getElementById('edition-observations').value.trim() || null,
+  };
+  if (!updates.date || !updates.heure_debut || !updates.type) {
+    toast('Champs obligatoires manquants (date, heure début, type).', 'error');
+    return;
+  }
+  try {
+    await apiFetch(`/interventions/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+    toast('Intervention modifiée avec succès.', 'success');
+    fermerEdition();
+    await Promise.all([loadJournal(), loadDashboard(), loadHistorique()]);
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
+}
+
+async function supprimerDepuisJournal(id) {
+  const i = journalData.find(x => x.id === id) || allInterventions.find(x => x.id === id);
+  const label = i ? `${i.type} – ${i.ouvrage} (${formatDate(i.date)})` : id;
+  if (!confirm(`Supprimer définitivement :\n« ${label } »\n\nCette action est irréversible.`)) return;
+  try {
+    await apiFetch(`/interventions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    toast('Intervention supprimée.', 'success');
+    await Promise.all([loadJournal(), loadDashboard(), loadHistorique()]);
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
+}
+
+/* ---------- Historique des modifications (admin) ---------- */
+
+async function loadJournalModifications() {
+  const tbody = document.getElementById('audit-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">Chargement…</td></tr>';
+  try {
+    const data = await apiFetch('/journal');
+    renderJournalModifications(data);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-msg">Erreur : ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function renderJournalModifications(data) {
+  const tbody = document.getElementById('audit-tbody');
+  if (!tbody) return;
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">Aucune modification enregistrée.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.map(m => {
+    const actionClass = m.action === 'Création' ? 'badge badge-en-cours'
+      : m.action === 'Suppression' ? 'badge badge-archivee'
+      : 'badge badge-suspendue';
+    let details = '–';
+    if (m.details) {
+      const d = typeof m.details === 'string' ? JSON.parse(m.details) : m.details;
+      const champs = Object.entries(d)
+        .filter(([k]) => !['id', 'created_at', 'agent_email'].includes(k))
+        .map(([k, v]) => `${k}: ${v === null ? '–' : v}`)
+        .join(' | ');
+      details = champs || '–';
+    }
+    const agentNom = m.fait_par_email ? m.fait_par_email.split('@')[0] : '–';
+    return `<tr>
+      <td style="white-space:nowrap;font-size:.82rem">${formatDateHMS(m.fait_a)}</td>
+      <td><span class="${actionClass}">${esc(m.action)}</span></td>
+      <td style="font-family:monospace;font-size:.78rem">${esc(m.intervention_id)}</td>
+      <td style="font-size:.82rem">${esc(agentNom)}</td>
+      <td class="audit-details" title="${esc(details)}">${esc(details)}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ============================================================
    PARAMÈTRES – LISTES
    ============================================================ */
 
 async function loadListes() {
   try {
-    listes = await apiFetch('/listes');
+    const data = await apiFetch('/listes');
+    listesParents = data.__parents__ || {};
+    delete data.__parents__;
+    listes = data;
     renderListes();
     populateSelects();
   } catch (e) {
@@ -444,30 +721,148 @@ async function loadListes() {
 
 function renderListes() {
   const container = document.getElementById('listes-container');
-  const noms = Object.keys(listes);
+  const childListNames = new Set(Object.keys(listesParents));
+  // Afficher uniquement les listes racines (ni internes, ni enfants d'une autre)
+  const noms = Object.keys(listes).filter(n => !childListNames.has(n));
   if (noms.length === 0) {
     container.innerHTML = '<div class="empty-msg">Aucune liste configurée.</div>';
     return;
   }
+  container.innerHTML = noms.map(nom => renderListeCard(nom)).join('');
+}
 
-  container.innerHTML = noms.map(nom => `
+function renderListeCard(nom) {
+  const valeurs = listes[nom] || [];
+  const slug = slugify(nom);
+
+  const valeursHTML = valeurs.map(v => {
+    const childListName = findChildList(nom, v);
+    const esc_nom = esc(nom).replace(/'/g, '&#39;');
+    const esc_v   = esc(v).replace(/'/g, '&#39;');
+    return `
+      <div class="liste-valeur-bloc">
+        <div class="liste-valeur-row">
+          <span class="liste-valeur-label">${esc(v)}</span>
+          <div class="liste-valeur-actions">
+            ${childListName
+              ? `<span class="badge-sous-liste" title="Sous-liste : ${esc(childListName)}">▸ ${esc(childListName)}</span>`
+              : `<button class="btn btn-xs btn-outline" onclick="ouvrirCreerEnfant('${esc_nom}','${esc_v}')">+ Sous-liste</button>`}
+            <button class="btn-suppr-valeur" title="Supprimer" onclick="supprimerValeur('${esc_nom}','${esc_v}')">✕</button>
+          </div>
+        </div>
+        ${childListName ? `<div class="liste-enfant-card">${renderListeCard(childListName)}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  return `
     <div class="param-card liste-bloc">
       <div class="liste-nom">
-        <span>${esc(nom)}</span>
+        <span class="liste-nom-label">${esc(nom)}</span>
         <button class="btn btn-sm btn-red" onclick="supprimerListe('${esc(nom)}')">Supprimer la liste</button>
       </div>
-      <div class="liste-valeurs" id="valeurs-${slugify(nom)}">
-        ${(listes[nom] || []).map(v => `
-          <div class="liste-valeur-row">
-            <span>${esc(v)}</span>
-            <button class="btn-suppr-valeur" title="Supprimer" onclick="supprimerValeur('${esc(nom)}', '${esc(v)}')">✕</button>
-          </div>`).join('')}
+      <div class="liste-valeurs" id="valeurs-${slug}">
+        ${valeursHTML || '<div style="font-size:.82rem;color:var(--gray-500);font-style:italic;padding:.25rem 0">Aucune valeur</div>'}
       </div>
       <div class="add-valeur-row">
-        <input type="text" id="add-input-${slugify(nom)}" placeholder="Nouvelle valeur…" />
+        <input type="text" id="add-input-${slug}" placeholder="Nouvelle valeur…"
+          onkeydown="if(event.key==='Enter') ajouterValeur('${esc(nom)}')" />
         <button class="btn btn-sm btn-primary" onclick="ajouterValeur('${esc(nom)}')">Ajouter</button>
       </div>
-    </div>`).join('');
+      <div class="coller-toggle" onclick="toggleColler('${slug}')">▸ Coller depuis Excel / texte</div>
+      <div id="coller-zone-${slug}" class="coller-zone hidden">
+        <textarea id="coller-input-${slug}" placeholder="Une valeur par ligne…" rows="4"></textarea>
+        <button class="btn btn-sm btn-secondary" onclick="collerValeurs('${esc(nom)}')">Importer</button>
+      </div>
+    </div>`;
+}
+
+function findChildList(parentListName, parentValue) {
+  const key = `${parentListName}::${parentValue}`;
+  return Object.keys(listesParents).find(n => listesParents[n] === key) || null;
+}
+
+/* ---- Cascade multi-niveaux dans le formulaire ---- */
+
+function onTypeChange() {
+  const container = document.getElementById('cascade-container');
+  if (!container) return;
+  container.innerHTML = '';
+  const type = document.getElementById('f-type').value;
+  buildCascadeLevels(container, 'Type intervention', type, 1);
+}
+
+function buildCascadeLevels(container, parentListName, parentValue, level) {
+  if (!parentValue) return;
+  const childListName = findChildList(parentListName, parentValue);
+  if (!childListName || !listes[childListName] || listes[childListName].length === 0) return;
+
+  const levelId = `f-cascade-${level}`;
+  const row = document.createElement('div');
+  row.className = 'form-row';
+  row.id = `cascade-row-${level}`;
+  const safeList = childListName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  row.innerHTML = `
+    <div class="form-group cascade-level" style="flex:1">
+      <label for="${levelId}">${esc(childListName)}</label>
+      <select id="${levelId}" onchange="onCascadeChange(${level}, '${safeList}')">
+        <option value="">— Sélectionner —</option>
+        ${listes[childListName].map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}
+      </select>
+    </div>`;
+  container.appendChild(row);
+}
+
+function onCascadeChange(level, listName) {
+  const value = document.getElementById(`f-cascade-${level}`)?.value || '';
+  const container = document.getElementById('cascade-container');
+  for (let i = level + 1; i <= 10; i++) {
+    const el = document.getElementById(`cascade-row-${i}`);
+    if (el) el.remove(); else break;
+  }
+  buildCascadeLevels(container, listName, value, level + 1);
+}
+
+function getCascadeValues() {
+  const type = document.getElementById('f-type').value;
+  const parts = [];
+  for (let i = 1; i <= 10; i++) {
+    const sel = document.getElementById(`f-cascade-${i}`);
+    if (!sel) break;
+    if (sel.value) parts.push(sel.value);
+  }
+  return { type, sous_type: parts.length ? parts.join(' › ') : null };
+}
+
+/* ---- Créer une sous-liste depuis Paramètres ---- */
+
+function ouvrirCreerEnfant(parentListe, parentValeur) {
+  document.getElementById('creer-enfant-parent-liste').value = parentListe;
+  document.getElementById('creer-enfant-parent-valeur').value = parentValeur;
+  document.getElementById('creer-enfant-context').textContent =
+    `Sous-liste pour la valeur « ${parentValeur} » de la liste « ${parentListe} »`;
+  document.getElementById('creer-enfant-nom').value = '';
+  document.getElementById('creer-enfant-premiere-valeur').value = '';
+  document.getElementById('modal-creer-enfant').classList.remove('hidden');
+}
+
+async function confirmerCreerEnfant() {
+  const parentListe    = document.getElementById('creer-enfant-parent-liste').value;
+  const parentValeur   = document.getElementById('creer-enfant-parent-valeur').value;
+  const nom_liste      = document.getElementById('creer-enfant-nom').value.trim();
+  const premiere_valeur = document.getElementById('creer-enfant-premiere-valeur').value.trim();
+  if (!nom_liste || !premiere_valeur) {
+    toast('Renseignez le nom et la première valeur.', 'error'); return;
+  }
+  const parent_key = `${parentListe}::${parentValeur}`;
+  try {
+    await apiFetch('/listes/creer', {
+      method: 'POST',
+      body: JSON.stringify({ nom_liste, premiere_valeur, parent_key }),
+    });
+    toast(`Sous-liste "${nom_liste}" créée.`, 'success');
+    document.getElementById('modal-creer-enfant').classList.add('hidden');
+    await loadListes();
+  } catch (e) { toast('Erreur : ' + e.message, 'error'); }
 }
 
 function slugify(s) {
@@ -504,6 +899,35 @@ async function supprimerListe(nom_liste) {
   try {
     await apiFetch('/listes/liste', { method: 'DELETE', body: JSON.stringify({ nom_liste }) });
     toast(`Liste "${nom_liste}" supprimée.`, 'success');
+    await loadListes();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
+}
+
+function toggleColler(slug) {
+  const zone = document.getElementById('coller-zone-' + slug);
+  zone.classList.toggle('hidden');
+}
+
+async function collerValeurs(nom_liste) {
+  const slug  = slugify(nom_liste);
+  const texte = document.getElementById('coller-input-' + slug)?.value || '';
+  const valeurs = texte
+    .split(/\r?\n/)
+    .map(line => line.split('\t')[0].trim())  // garde uniquement la 1re colonne Excel
+    .filter(v => v.length > 0);
+
+  if (valeurs.length === 0) { toast('Aucune valeur à importer.', 'error'); return; }
+
+  try {
+    const res = await apiFetch('/listes/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ nom_liste, valeurs }),
+    });
+    toast(`${res.inserted} valeur(s) importée(s).`, 'success');
+    document.getElementById('coller-input-' + slug).value = '';
+    document.getElementById('coller-zone-' + slug).classList.add('hidden');
     await loadListes();
   } catch (e) {
     toast('Erreur : ' + e.message, 'error');
@@ -553,39 +977,37 @@ async function exporterSauvegarde() {
   }
 }
 
-async function importerListes() {
-  const file = document.getElementById('import-listes-file').files[0];
-  if (!file) { toast('Sélectionnez un fichier JSON.', 'error'); return; }
+async function importerComplet() {
+  const file = document.getElementById('import-complet-file')?.files[0];
+  if (!file) { toast('Sélectionnez un fichier de sauvegarde JSON.', 'error'); return; }
   try {
     const text = await file.text();
     const json = JSON.parse(text);
-    const listes = json.listes || [];
-    await apiFetch('/backup/import-listes', { method: 'POST', body: JSON.stringify({ listes }) });
-    toast(`${listes.length} entrées de listes importées.`, 'success');
-    document.getElementById('import-listes-file').value = '';
-    await loadListes();
-  } catch (e) {
-    toast('Erreur import listes : ' + e.message, 'error');
-  }
-}
+    const msg = [];
 
-async function importerInterventions() {
-  const file = document.getElementById('import-interventions-file').files[0];
-  if (!file) { toast('Sélectionnez un fichier JSON.', 'error'); return; }
-  try {
-    const text = await file.text();
-    const json = JSON.parse(text);
-    const interventions = json.interventions || [];
-    const res = await apiFetch('/backup/import-interventions', {
-      method: 'POST',
-      body: JSON.stringify({ interventions }),
-    });
-    toast(`${res.imported} intervention(s) importée(s).`, 'success');
-    document.getElementById('import-interventions-file').value = '';
-    await loadDashboard();
-    await loadHistorique();
+    if (Array.isArray(json.listes) && json.listes.length > 0) {
+      await apiFetch('/backup/import-listes', { method: 'POST', body: JSON.stringify({ listes: json.listes }) });
+      msg.push(`${json.listes.length} valeurs de listes`);
+      await loadListes();
+    }
+    if (Array.isArray(json.interventions) && json.interventions.length > 0) {
+      const res = await apiFetch('/backup/import-interventions', {
+        method: 'POST',
+        body: JSON.stringify({ interventions: json.interventions }),
+      });
+      msg.push(`${res.imported} intervention(s)`);
+      await loadDashboard();
+      await loadHistorique();
+    }
+
+    if (msg.length === 0) {
+      toast('Aucune donnée reconnue dans ce fichier.', 'error');
+    } else {
+      document.getElementById('import-complet-file').value = '';
+      toast(`Import réussi : ${msg.join(' + ')}.`, 'success');
+    }
   } catch (e) {
-    toast('Erreur import interventions : ' + e.message, 'error');
+    toast('Erreur import : ' + e.message, 'error');
   }
 }
 
@@ -603,26 +1025,31 @@ function hideLoginScreen() {
 
 function updateHeaderUser() {
   if (!currentUser) return;
-  const initials = (currentUser.display_name || currentUser.email)
-    .split(/[\s@]/)[0].slice(0, 2).toUpperCase();
-  document.getElementById('user-avatar').textContent      = initials;
-  document.getElementById('user-display-name').textContent = currentUser.display_name || currentUser.email;
-  document.getElementById('compte-email').textContent     = currentUser.email;
+  const initials = (currentUser.display_name || '?')
+    .split(' ').map(w => w[0] || '').join('').slice(0, 2).toUpperCase();
+  document.getElementById('user-avatar').textContent       = initials;
+  document.getElementById('user-display-name').textContent = currentUser.display_name || '–';
+  const compteNomEl = document.getElementById('compte-nom');
+  if (compteNomEl) compteNomEl.textContent = currentUser.display_name || '–';
+
+  const adminNav = document.getElementById('nav-sub-admin');
+  if (currentUser.is_admin) adminNav?.classList.remove('hidden');
+  else                      adminNav?.classList.add('hidden');
 }
 
 async function login() {
-  const email    = document.getElementById('login-email').value.trim();
+  const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value;
   const errEl    = document.getElementById('login-error');
   errEl.textContent = '';
 
-  if (!email || !password) { errEl.textContent = 'Email et mot de passe requis.'; return; }
+  if (!username || !password) { errEl.textContent = 'Nom et mot de passe requis.'; return; }
 
   try {
     const data = await fetch(API + '/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ username, password }),
     }).then(async r => {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Identifiants incorrects');
@@ -634,6 +1061,7 @@ async function login() {
       refresh_token: data.refresh_token,
       email:         data.email,
       display_name:  data.display_name,
+      is_admin:      data.is_admin || false,
     };
     sessionStorage.setItem('sicae_user', JSON.stringify(currentUser));
 
@@ -641,6 +1069,8 @@ async function login() {
     updateHeaderUser();
     await Promise.all([loadListes(), loadDashboard(), loadHistorique(), loadAppUsers()]);
     initFormInterventions();
+    await loadConduite();
+    if (currentUser.is_admin) await loadUsers();
     await connectRealtime();
     toast(`Bienvenue, ${currentUser.display_name} !`, 'success');
   } catch (e) {
@@ -652,6 +1082,7 @@ function logout() {
   disconnectRealtime();
   currentUser = null;
   sessionStorage.removeItem('sicae_user');
+  document.getElementById('nav-sub-admin')?.classList.add('hidden');
   showLoginScreen();
   document.getElementById('login-password').value = '';
   document.getElementById('login-error').textContent = '';
@@ -684,18 +1115,25 @@ async function changerMotDePasse() {
 async function loadAppUsers() {
   try {
     appUsers = await apiFetch('/auth/users');
-    const sel = document.getElementById('transfert-to-email');
-    sel.innerHTML = '<option value="">— Sélectionner un agent —</option>';
-    if (appUsers.length === 0) {
-      sel.innerHTML += '<option disabled>Aucun autre agent disponible</option>';
-      return;
+
+    // Dropdown transfert de conduite (modal)
+    const selTransfert = document.getElementById('transfert-to-email');
+    if (selTransfert) {
+      selTransfert.innerHTML = '<option value="">— Sélectionner un agent —</option>';
+      if (appUsers.length === 0) {
+        selTransfert.innerHTML += '<option disabled>Aucun autre agent disponible</option>';
+      } else {
+        appUsers.forEach(u => {
+          const opt = document.createElement('option');
+          opt.value = u.email;
+          opt.textContent = u.display_name;
+          selTransfert.appendChild(opt);
+        });
+      }
     }
-    appUsers.forEach(u => {
-      const opt = document.createElement('option');
-      opt.value       = u.email;
-      opt.textContent = `${u.display_name} (${u.email})`;
-      sel.appendChild(opt);
-    });
+
+    // Dropdown passation de conduite (tab conduite)
+    populateConduiteSelect();
   } catch (e) {
     toast('Impossible de charger la liste des agents : ' + e.message, 'error');
   }
@@ -794,7 +1232,7 @@ async function loadPendingTransferts(notify = false) {
           <div class="transfert-info">
             <div class="transfert-title">⇄ Transfert de conduite — ${esc(int.type || '?')}</div>
             <div class="transfert-meta">
-              📍 ${esc(int.ouvrage || '?')} · ${esc(int.commune || '')} ·
+              📍 ${esc(int.ouvrage || '?')} ·
               De : <strong>${esc(t.from_email)}</strong>
             </div>
             ${t.observation ? `<div class="transfert-obs">"${esc(t.observation)}"</div>` : ''}
@@ -889,7 +1327,7 @@ async function genererRapport() {
       <div class="kpi-card kpi-blue"><div class="kpi-value">${formatDureeMin(dureeMoy)}</div><div class="kpi-label">Durée moy.</div></div>`;
 
     // Label groupe
-    const groupeLabels = { commune: 'commune', type: "type d'intervention", ouvrage: 'ouvrage' };
+    const groupeLabels = { site: 'site', type: "type d'intervention", ouvrage: 'ouvrage' };
     document.getElementById('chart-groupe-label').textContent = groupeLabels[groupe] || groupe;
 
     // Données groupées
@@ -943,7 +1381,7 @@ async function genererRapport() {
         <td>${formatDate(i.date)}</td>
         <td>${esc(i.type)}</td>
         <td>${esc(i.ouvrage)}</td>
-        <td>${esc(i.commune)}</td>
+        <td>${esc(i.site || '')}</td>
         <td>${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ''}</td>
         <td>${formatDureeMin(calculerDureeMin(i))}</td>
         <td><span class="${badgeClass(i.statut)}">${esc(i.statut)}</span></td>
@@ -967,7 +1405,7 @@ function exportExcel() {
     'Date':           formatDate(i.date),
     'Type':           i.type,
     'Ouvrage':        i.ouvrage,
-    'Commune':        i.commune,
+    'Site':           i.site || '',
     'Heure début':    i.heure_debut,
     'Heure fin':      i.heure_fin || '',
     'Durée (min)':    calculerDureeMin(i) ?? '',
@@ -979,7 +1417,7 @@ function exportExcel() {
 
   // Feuille 2 : résumé par groupe
   const grouped = groupBy(rapportData, groupe);
-  const groupeLabel = { commune: 'Commune', type: "Type d'intervention", ouvrage: 'Ouvrage' }[groupe];
+  const groupeLabel = { site: 'Site', type: "Type d'intervention", ouvrage: 'Ouvrage' }[groupe];
   const ws2 = XLSX.utils.json_to_sheet(
     Object.entries(grouped).sort().map(([key, items]) => {
       const d = items.map(calculerDureeMin).filter(x => x !== null);
@@ -1008,7 +1446,7 @@ function exportPDF() {
   const dateDebut    = document.getElementById('r-date-debut').value;
   const dateFin      = document.getElementById('r-date-fin').value;
   const statutFiltre = document.getElementById('r-statut-filtre').value;
-  const groupeLabel  = { commune: 'Commune', type: "Type d'intervention", ouvrage: 'Ouvrage' }[groupe];
+  const groupeLabel  = { site: 'Site', type: "Type d'intervention", ouvrage: 'Ouvrage' }[groupe];
 
   const terminees = rapportData.filter(i => i.statut === 'Terminée');
   const durees    = terminees.map(calculerDureeMin).filter(d => d !== null);
@@ -1031,11 +1469,12 @@ function exportPDF() {
       <td>${formatDate(i.date)}</td>
       <td>${esc(i.type)}</td>
       <td>${esc(i.ouvrage)}</td>
-      <td>${esc(i.commune)}</td>
+      <td>${esc(i.site || '')}</td>
       <td>${esc(i.heure_debut)}${i.heure_fin ? ' → ' + esc(i.heure_fin) : ''}</td>
       <td>${formatDureeMin(calculerDureeMin(i))}</td>
       <td><span style="background:${sc}22;color:${sc};padding:2px 8px;border-radius:50px;font-size:8pt;font-weight:700">${esc(i.statut)}</span></td>
       <td style="font-size:8pt;color:#6c757d">${esc(i.observations || '')}</td>
+      <td style="font-size:8pt">${(i.intervenants && i.intervenants.length > 0) ? i.intervenants.map(iv => `${esc(iv.entreprise)} – ${esc(iv.agent)}`).join('<br>') : ''}</td>
     </tr>`;
   }).join('');
 
@@ -1108,7 +1547,7 @@ tr:nth-child(even) td{background:#f8f9fa}
 
 <div class="sec">Détail des interventions (${rapportData.length})</div>
 <table>
-  <thead><tr><th>Date</th><th>Type</th><th>Ouvrage</th><th>Commune</th><th>Horaires</th><th>Durée</th><th>Statut</th><th>Observations</th></tr></thead>
+  <thead><tr><th>Date</th><th>Type</th><th>Ouvrage</th><th>Site</th><th>Horaires</th><th>Durée</th><th>Statut</th><th>Observations</th><th>Intervenants</th></tr></thead>
   <tbody>${lignesDetail}</tbody>
 </table>
 
@@ -1119,6 +1558,266 @@ tr:nth-child(even) td{background:#f8f9fa}
   const url  = URL.createObjectURL(blob);
   window.open(url, '_blank');
   toast('Page PDF ouverte — utilise "Imprimer → Enregistrer en PDF".', 'success');
+}
+
+/* ============================================================
+   TRANSFERT DE CONDUITE RÉSEAU
+   ============================================================ */
+
+function formatHMS(isoStr) {
+  if (!isoStr) return '–';
+  const d = new Date(isoStr);
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function formatDateHMS(isoStr) {
+  if (!isoStr) return '–';
+  const d = new Date(isoStr);
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function dureeSinceISO(isoStr) {
+  if (!isoStr) return '';
+  const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+  const h = Math.floor(diff / 3600);
+  const m = Math.floor((diff % 3600) / 60);
+  if (h > 0) return `depuis ${h}h${String(m).padStart(2,'0')}`;
+  return `depuis ${m} min`;
+}
+
+async function loadConduite() {
+  try {
+    const data = await apiFetch('/conduite');
+    renderConducteurActuel(data.conducteurActuel);
+    renderConduiteAttente(data.enAttentePourMoi || []);
+    renderJournalConduite(data.journal || []);
+    populateConduiteSelect();
+
+    const badge = document.getElementById('badge-conduite');
+    const n = (data.enAttentePourMoi || []).length;
+    if (n > 0) { badge.textContent = n; badge.classList.remove('hidden'); }
+    else badge.classList.add('hidden');
+  } catch (e) {
+    toast('Erreur chargement conduite : ' + e.message, 'error');
+  }
+}
+
+function renderConducteurActuel(c) {
+  const nameEl  = document.getElementById('conducteur-name');
+  const sinceEl = document.getElementById('conducteur-since');
+  if (!c) {
+    nameEl.textContent  = 'Non défini';
+    sinceEl.textContent = '';
+    return;
+  }
+  const isMoi = c.email === currentUser?.email;
+  nameEl.textContent  = c.name + (isMoi ? ' (vous)' : '');
+  sinceEl.textContent = `Prise en charge le ${formatDateHMS(c.depuis)} — ${dureeSinceISO(c.depuis)}`;
+}
+
+function renderConduiteAttente(items) {
+  const section = document.getElementById('conduite-attente-section');
+  const cards   = document.getElementById('conduite-attente-cards');
+  if (items.length === 0) { section.classList.add('hidden'); return; }
+  section.classList.remove('hidden');
+  cards.innerHTML = items.map(r => `
+    <div class="param-card" style="border-left:4px solid var(--orange);margin-bottom:.75rem">
+      <div style="font-weight:700;margin-bottom:.35rem">
+        Passation de <strong>${esc(r.from_name)}</strong>
+      </div>
+      <div style="font-size:.85rem;color:var(--gray-600);margin-bottom:.5rem">
+        Demandée le ${formatDateHMS(r.demande_at)}
+      </div>
+      ${r.observations ? `<div class="card-obs" style="margin-bottom:.75rem">"${esc(r.observations)}"</div>` : ''}
+      <div style="display:flex;gap:.5rem">
+        <button class="btn btn-sm btn-primary" onclick="accepterPassation(${r.id})">✓ Accepter la conduite</button>
+        <button class="btn btn-sm btn-red"     onclick="refuserPassation(${r.id})">✕ Refuser</button>
+      </div>
+    </div>`).join('');
+}
+
+function renderJournalConduite(journal) {
+  const tbody = document.getElementById('conduite-journal-tbody');
+  if (journal.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-msg">Aucune passation enregistrée</td></tr>';
+    return;
+  }
+  tbody.innerHTML = journal.map(r => {
+    const statutClass = r.statut === 'Accepté' ? 'badge-terminee' : r.statut === 'Refusé' ? 'badge-en-transfert' : 'badge-suspendue';
+    const d = new Date(r.demande_at);
+    const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    return `
+      <tr>
+        <td>${dateStr}</td>
+        <td>${esc(r.from_name)}</td>
+        <td>${esc(r.to_name)}</td>
+        <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${formatHMS(r.demande_at)}</td>
+        <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${r.accepte_at ? formatHMS(r.accepte_at) : '–'}</td>
+        <td><span class="badge ${statutClass}">${esc(r.statut)}</span></td>
+        <td style="font-size:.82rem;color:var(--gray-600)">${esc(r.observations || '')}</td>
+      </tr>`;
+  }).join('');
+}
+
+function populateConduiteSelect() {
+  const sel = document.getElementById('conduite-to');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Sélectionner un agent —</option>';
+  appUsers.forEach(u => {
+    const opt = document.createElement('option');
+    opt.value       = u.email;
+    opt.dataset.name = u.display_name;
+    opt.textContent = u.display_name;
+    if (u.email === cur) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+async function initierPassation() {
+  const sel  = document.getElementById('conduite-to');
+  const obs  = document.getElementById('conduite-obs').value.trim() || null;
+  const to_email = sel.value;
+  const to_name  = sel.options[sel.selectedIndex]?.dataset.name || '';
+  if (!to_email) { toast('Sélectionnez un agent destinataire.', 'error'); return; }
+  try {
+    await apiFetch('/conduite', { method: 'POST', body: JSON.stringify({ to_email, to_name, observations: obs }) });
+    toast('Passation initiée — en attente d\'acceptation.', 'success');
+    document.getElementById('conduite-to').value = '';
+    document.getElementById('conduite-obs').value = '';
+    await loadConduite();
+  } catch (e) { toast('Erreur : ' + e.message, 'error'); }
+}
+
+async function accepterPassation(id) {
+  try {
+    await apiFetch(`/conduite/${id}/accept`, { method: 'PUT' });
+    toast('Conduite acceptée — vous êtes maintenant conducteur.', 'success');
+    await loadConduite();
+  } catch (e) { toast('Erreur : ' + e.message, 'error'); }
+}
+
+async function refuserPassation(id) {
+  if (!confirm('Refuser cette passation de conduite ?')) return;
+  try {
+    await apiFetch(`/conduite/${id}/refuse`, { method: 'PUT' });
+    toast('Passation refusée.', 'success');
+    await loadConduite();
+  } catch (e) { toast('Erreur : ' + e.message, 'error'); }
+}
+
+/* ============================================================
+   ADMINISTRATION UTILISATEURS
+   ============================================================ */
+
+let adminUsers = [];
+
+async function loadUsers() {
+  try {
+    adminUsers = await apiFetch('/users');
+    renderUsers();
+  } catch (e) {
+    toast('Erreur chargement utilisateurs : ' + e.message, 'error');
+  }
+}
+
+function renderUsers() {
+  const tbody = document.getElementById('admin-users-tbody');
+  if (!tbody) return;
+  if (adminUsers.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-msg">Aucun utilisateur</td></tr>';
+    return;
+  }
+  tbody.innerHTML = adminUsers.map(u => {
+    const isSelf = u.email === currentUser?.email;
+    const roleBadge = u.is_admin
+      ? '<span class="badge badge-en-cours" style="background:#1a3a5c">Admin</span>'
+      : '<span class="badge" style="background:#6c757d;color:#fff">Agent</span>';
+    const toggleLabel = u.is_admin ? 'Rétrograder agent' : 'Promouvoir admin';
+    return `
+      <tr>
+        <td><strong>${esc(u.display_name)}</strong></td>
+        <td>${roleBadge}</td>
+        <td style="min-width:220px">
+          <div style="display:flex;gap:.5rem;align-items:center">
+            <input type="password" id="pwd-${esc(u.email)}" placeholder="Nouveau mot de passe"
+              style="flex:1;padding:.35rem .6rem;border:1px solid var(--gray-300);border-radius:6px;font-size:.85rem" />
+            <button class="btn btn-sm btn-secondary" onclick="resetMotDePasse('${esc(u.email)}')">OK</button>
+          </div>
+        </td>
+        <td>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+            ${!isSelf ? `<button class="btn btn-sm btn-ghost" onclick="toggleAdmin('${esc(u.email)}',${!u.is_admin})">${toggleLabel}</button>` : ''}
+            ${!isSelf ? `<button class="btn btn-sm btn-red" onclick="supprimerUtilisateur('${esc(u.email)}','${esc(u.display_name)}')">Supprimer</button>` : '<span style="font-size:.8rem;color:var(--gray-500)">(vous)</span>'}
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+async function creerUtilisateur() {
+  const username = document.getElementById('admin-new-nom').value.trim();
+  const password = document.getElementById('admin-new-pwd').value;
+  const is_admin = document.getElementById('admin-new-is-admin').checked;
+
+  if (!username || !password) { toast('Nom et mot de passe requis.', 'error'); return; }
+  if (password.length < 6) { toast('Mot de passe : 6 caractères minimum.', 'error'); return; }
+
+  try {
+    await apiFetch('/users', { method: 'POST', body: JSON.stringify({ username, password, is_admin }) });
+    toast(`Utilisateur "${username}" créé.`, 'success');
+    document.getElementById('admin-new-nom').value = '';
+    document.getElementById('admin-new-pwd').value = '';
+    document.getElementById('admin-new-is-admin').checked = false;
+    await loadUsers();
+    await loadAppUsers();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
+}
+
+async function supprimerUtilisateur(email, nom) {
+  if (!confirm(`Supprimer l'utilisateur "${nom}" ? Cette action est irréversible.`)) return;
+  try {
+    await apiFetch(`/users/${encodeURIComponent(email)}`, { method: 'DELETE' });
+    toast(`Utilisateur "${nom}" supprimé.`, 'success');
+    await loadUsers();
+    await loadAppUsers();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
+}
+
+async function resetMotDePasse(email) {
+  const input = document.getElementById(`pwd-${email}`);
+  const password = input?.value || '';
+  if (!password) { toast('Saisissez un nouveau mot de passe.', 'error'); return; }
+  if (password.length < 6) { toast('6 caractères minimum.', 'error'); return; }
+  try {
+    await apiFetch(`/users/${encodeURIComponent(email)}/password`, {
+      method: 'PUT', body: JSON.stringify({ password }),
+    });
+    toast('Mot de passe réinitialisé.', 'success');
+    if (input) input.value = '';
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
+}
+
+async function toggleAdmin(email, is_admin) {
+  const action = is_admin ? 'Promouvoir administrateur' : 'Rétrograder en agent';
+  if (!confirm(`${action} ?`)) return;
+  try {
+    await apiFetch(`/users/${encodeURIComponent(email)}/admin`, {
+      method: 'PUT', body: JSON.stringify({ is_admin }),
+    });
+    toast('Rôle modifié.', 'success');
+    await loadUsers();
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
 }
 
 /* ============================================================
@@ -1133,18 +1832,86 @@ async function init() {
 
   // Login / logout
   document.getElementById('btn-login').addEventListener('click', login);
+  document.getElementById('login-username').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
   document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
   document.getElementById('btn-logout').addEventListener('click', logout);
 
-  // Navigation — le clic sur "Tableau de bord" rafraîchit les données
-  // Notifie les transferts seulement si Realtime n'est pas connecté (fallback)
-  document.querySelectorAll('.nav-btn').forEach(btn => {
+  // Transfert de conduite
+  document.getElementById('btn-initier-passation').addEventListener('click', initierPassation);
+
+  // Administration utilisateurs
+  document.getElementById('btn-admin-creer').addEventListener('click', creerUtilisateur);
+
+  // Audit (admin)
+  document.getElementById('btn-refresh-audit').addEventListener('click', loadJournalModifications);
+
+  // Journal des interventions
+  document.getElementById('btn-journal-refresh').addEventListener('click', loadJournal);
+  document.getElementById('journal-search').addEventListener('input', filterJournal);
+  document.getElementById('journal-statut-filter').addEventListener('change', filterJournal);
+  document.getElementById('journal-date-debut').addEventListener('change', filterJournal);
+  document.getElementById('journal-date-fin').addEventListener('change', filterJournal);
+
+  // Modale édition intervention
+  document.getElementById('btn-sauvegarder-edition').addEventListener('click', sauvegarderEdition);
+  document.getElementById('btn-annuler-edition').addEventListener('click', fermerEdition);
+  document.getElementById('modal-edition').addEventListener('click', function(e) { if (e.target === this) fermerEdition(); });
+
+  // Cascade sous-type dans l'édition
+  document.getElementById('edition-type').addEventListener('change', () => {
+    const type = document.getElementById('edition-type').value;
+    const childListName = findChildList('Type intervention', type);
+    const grp = document.getElementById('edition-sous-type-group');
+    if (childListName && listes[childListName]) {
+      fillSelect('edition-sous-type', listes[childListName]);
+      if (grp) grp.style.display = '';
+    } else {
+      if (grp) grp.style.display = 'none';
+    }
+  });
+
+  // Modale créer sous-liste
+  document.getElementById('btn-confirmer-enfant').addEventListener('click', confirmerCreerEnfant);
+  document.getElementById('btn-annuler-enfant').addEventListener('click', () => {
+    document.getElementById('modal-creer-enfant').classList.add('hidden');
+  });
+  document.getElementById('modal-creer-enfant').addEventListener('click', function(e) {
+    if (e.target === this) this.classList.add('hidden');
+  });
+
+  // FAB — nouvelle intervention
+  document.getElementById('btn-fab-new').addEventListener('click', () => switchTab('nouvelle'));
+
+  // Navigation : boutons directs (avec data-tab)
+  document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
       switchTab(btn.dataset.tab);
-      if (btn.dataset.tab === 'dashboard' && currentUser) {
-        loadDashboard(!realtimeChannel);
-      }
+      if (btn.dataset.tab === 'dashboard' && currentUser) loadDashboard(!realtimeChannel);
     });
+  });
+
+  // Navigation : toggles dropdown (avec data-group)
+  document.querySelectorAll('.nav-drop-toggle').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const item = btn.closest('.nav-item');
+      const isOpen = item.classList.contains('drop-open');
+      document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('drop-open'));
+      if (!isOpen) item.classList.add('drop-open');
+    });
+  });
+
+  // Navigation : sous-items dans les dropdowns
+  document.querySelectorAll('.nav-drop-item[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      switchTab(btn.dataset.tab);
+      if (btn.dataset.tab === 'dashboard' && currentUser) loadDashboard(!realtimeChannel);
+    });
+  });
+
+  // Fermer les dropdowns en cliquant ailleurs
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('drop-open'));
   });
 
   // Vérification des transferts au retour sur l'onglet navigateur
@@ -1178,14 +1945,10 @@ async function init() {
   document.getElementById('btn-annuler-transfert').addEventListener('click', fermerTransfert);
   document.getElementById('modal-transfert').addEventListener('click', function(e) { if (e.target === this) fermerTransfert(); });
 
-  // Paramètres — compte
-  document.getElementById('btn-change-pwd').addEventListener('click', changerMotDePasse);
 
-  // Paramètres — listes
-  document.getElementById('btn-creer-liste').addEventListener('click', creerListe);
+  // Paramètres — sauvegarde
   document.getElementById('btn-export').addEventListener('click', exporterSauvegarde);
-  document.getElementById('btn-import-listes').addEventListener('click', importerListes);
-  document.getElementById('btn-import-interventions').addEventListener('click', importerInterventions);
+  document.getElementById('btn-import-complet').addEventListener('click', importerComplet);
 
   // Rapports
   document.getElementById('btn-generer-rapport').addEventListener('click', genererRapport);
@@ -1201,6 +1964,8 @@ async function init() {
     updateHeaderUser();
     await Promise.all([loadListes(), loadDashboard(), loadHistorique(), loadAppUsers()]);
     initFormInterventions();
+    await loadConduite();
+    if (currentUser?.is_admin) await loadUsers();
     await connectRealtime();
   } else {
     showLoginScreen();
@@ -1220,3 +1985,19 @@ window.accepterTransfert      = accepterTransfert;
 window.refuserTransfert       = refuserTransfert;
 window.archiverIntervention   = archiverIntervention;
 window.desarchiverIntervention = desarchiverIntervention;
+window.accepterPassation      = accepterPassation;
+window.refuserPassation       = refuserPassation;
+window.toggleColler           = toggleColler;
+window.collerValeurs          = collerValeurs;
+window.supprimerUtilisateur   = supprimerUtilisateur;
+window.resetMotDePasse        = resetMotDePasse;
+window.toggleAdmin            = toggleAdmin;
+window.ouvrirEditionIntervention = ouvrirEditionIntervention;
+window.supprimerDepuisJournal = supprimerDepuisJournal;
+window.onEntrepriseChange  = onEntrepriseChange;
+window.toggleAgentPill     = toggleAgentPill;
+window.majIntervenants     = majIntervenants;
+window.retirerIntervenant  = retirerIntervenant;
+window.onTypeChange        = onTypeChange;
+window.onCascadeChange     = onCascadeChange;
+window.ouvrirCreerEnfant   = ouvrirCreerEnfant;
